@@ -1,3 +1,4 @@
+from .datacube import Datacube
 
 
 __author__ = 'Darío González Picos'

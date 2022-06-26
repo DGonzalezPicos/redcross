@@ -1,7 +1,8 @@
 __all__ = ['read_harpsn']
 
 
-from datacube import Datacube
+from .datacube import Datacube
+#import datacube
 import numpy as np
 from astropy.io import fits
 import astropy.units as u
@@ -129,56 +130,11 @@ def read_harpsn(files, filetype='s1d', max_files=1000):
             
     info = {'airmass':airmass, 'MJD':mjd,'BERV':berv,
            'RA_DEG':hdr['RA-DEG'], 'DEC_DEG':hdr['DEC-DEG'], 'DATE':hdr['DATE-OBS']}
-    dc = Datacube(np.array(flux), np.median(np.array(wlt), axis=0), **info)
+    dc = Datacube(flux=np.swapaxes(flux, 0, 1), wlt=np.swapaxes(wlt, 0, 1), **info)  
+
     return dc
 
-def read_s1d(files, max_files=1000, return_header=False, instrument='harpsn'):
-    bervkeyword = 'HIERARCH TNG DRS BERV'
-    flux, wlt, hdr_list = ([] for _ in range(3))
-    berv, airmass, npx, mjd = (np.array([]) for _ in range(4))
-    for i,f in enumerate(files[:max_files]):
-        filename = f.split('/')[-1]
-        print('--->', i, filename, end='\r')
-        hdul = fits.open(os.path.join(f))
-        hdr = hdul[0].header
-        hdr_list.append(hdr)
-        flux.append(hdul[0].data)
-        hdul.close()
-        
-        berv = np.append(berv, hdr[bervkeyword])
-        if instrument=='harpsn':
-            # for HARPSN the data is shifted to the stellar frame (barycentric correction applied here)
-            gamma = (1.0-(hdr[bervkeyword]*u.km/u.s/const.c).decompose().value) #Apply Doppler factor BERV.
-        elif instrument=='giano':
-            # GOFIO applies the BERV correction to s1d files, here we revert it
-            # GIANO-B data is now in the observer frame
-            gamma = (1.0-(hdr[bervkeyword]*u.km/u.s/const.c).decompose().value) #Remove applied Doppler factor BERV.
-            # gamma = 1.0
-        
-        # multiply by 10 to go from NM to AA
-        wavedata = (hdr['CDELT1']*np.arange(len(flux[-1]), dtype=float)+hdr['CRVAL1'])*gamma*10
-        wlt.append(wavedata)
-        mjd=np.append(mjd, hdr['MJD-OBS'])
-        airmass=np.append(airmass, hdr['AIRMASS'])
-        npx=np.append(npx,hdr['NAXIS1'])
-        
-#    Check that all exposures have the same number of pixels, and clip s1ds if needed.
-    min_npx = int(np.min(npx))
-    if np.sum(np.abs(np.array(npx)-npx[0])) != 0:
-        # print('Different number of pixels... cropping to {:}'.format(min_npx))
-        for i in range(len(flux)):
-            wlt[i]=wlt[i][0:min_npx]
-            flux[i]=flux[i][0:min_npx]
-            npx[i]=min_npx
-        
-    info = {'airmass':airmass, 'MJD':mjd,'BERV':berv,
-            'RA_DEG':hdr['RA-DEG'], 'DEC_DEG':hdr['DEC-DEG'], 'DATE':hdr['DATE-OBS']}
-    # dc = Datacube(np.array(flux), np.median(wlt, axis=0), **info)
-    dc = Datacube(np.array(flux), np.array(wlt), **info)
-    if return_header:
-        return dc, hdr_list
-    else:
-        return dc
+
 
     
     
