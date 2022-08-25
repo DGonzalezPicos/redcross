@@ -37,7 +37,8 @@ class CCF(Datacube):
         std_flux = np.nanstd(dc.flux[:,~nans], axis=1)
         std_temp = np.nanstd(self.template.flux_interp1d, axis=1)
         # divide = std_flux*std_temp
-        divide = np.outer(std_flux, std_temp)
+#        divide = np.outer(std_flux, std_temp)
+        divide = np.sum(self.template.flux)
         # print('divide.shape = ', divide.shape)
         
         
@@ -46,7 +47,12 @@ class CCF(Datacube):
             # self.flux = np.dot(((dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans]))/ np.power(dc.flux_err[:,~nans],2)),self.template.flux_interp1d.T) # TESTING
             
             data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
-            noise2 = np.power(np.nanstd(dc.flux[:,~nans], axis=0),2)
+#            noise2 = np.power(np.nanstd(dc.flux[:,~nans], axis=0),2)
+            noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
+#            noise2 = np.power(dc.flux_err[:,~nans],2)
+#            noise2 = np.outer(np.std(data, axis=1), np.std(data, axis=0))
+#            noise2 = 1.+np.power(np.nanstd(dc.flux[:,~nans], axis=0),2)
+#            noise2 = 1.+ np.power(np.nanmedian(dc.flux_err[:,~nans], axis=0), 2)
             self.flux = np.dot(data/noise2, self.template.flux_interp1d.T) # TESTING
 
 
@@ -89,21 +95,21 @@ class CCF(Datacube):
             self.template.flux_interp1d[i,:] = splev(new_wlt, cs)
         return self
     
-    def mask_eclipse(self, planet, t_14=0.18, debug=False):
-        '''given the planet PHASE and duration of eclipse `t_14` in days
-        return the datacube with the frames masked'''
-        shape_in = self.shape
-        phase = planet.phase
-        phase_14 = (t_14 % planet.P) / planet.P
-    
-        mask = (phase > (0.50 - (0.50*phase_14)))*(phase < (0.50 + (0.50*phase_14)))
-        self.flux = self.flux[~mask,:]
-      
-        if debug:
-            print('Original self.shape = {:}'.format(shape_in))
-            print('After ECLIPSE masking self.shape = {:}'.format(self.shape))
-                        
-        return self
+#    def mask_eclipse(self, planet, t_14=0.18, debug=False):
+#        '''given the planet PHASE and duration of eclipse `t_14` in days
+#        return the datacube with the frames masked'''
+#        shape_in = self.shape
+#        phase = planet.phase
+#        phase_14 = (t_14 % planet.P) / planet.P
+#    
+#        mask = (phase > (0.50 - (0.50*phase_14)))*(phase < (0.50 + (0.50*phase_14)))
+#        self.flux = self.flux[~mask,:]
+#      
+#        if debug:
+#            print('Original self.shape = {:}'.format(shape_in))
+#            print('After ECLIPSE masking self.shape = {:}'.format(self.shape))
+#                        
+#        return self
     
     def to_planet_frame(self, planet):
         ccf = self.copy()
@@ -114,6 +120,8 @@ class CCF(Datacube):
         ccf.rv = ccf.rv[mask]
         ccf.flux = ccf.flux[:,mask]
         return ccf
+    
+
     
                 
                 
@@ -205,7 +213,7 @@ class KpV:
         return obj
     
     
-    def fancy_figure(self, figsize=(6,6),snr_max=False, v_range=None, outname=None, title=None):
+    def fancy_figure(self, figsize=(6,6), peak=None, v_range=None, outname=None, title=None):
         '''Plot Kp-Vsys map with horizontal and vertical slices 
         snr_max=True prints the SNR for the maximum value'''
         import matplotlib.gridspec as gridspec
@@ -219,9 +227,12 @@ class KpV:
         plt.setp(ax2.get_xticklabels(), visible=False)
         plt.setp(ax3.get_yticklabels(), visible=False)
         
-        if v_range is not None:
+        if not v_range is None:
             vmin = v_range[0]
             vmax = v_range[1]
+            # fix y-axis (x-axis) of secondary axes
+            ax2.set(ylim=(v_range[0], v_range[1]))
+            ax3.set(xlim=(v_range[0], v_range[1]))
         else:
             vmin = self.snr.min()
             vmax = self.snr.max()
@@ -234,14 +245,13 @@ class KpV:
         # figure settings
         ax1.set(ylabel='Kp (km/s)', xlabel='Vrest (km/s)')
         fig.colorbar(obj, ax=ax3, pad=0.05)
-        if snr_max:
+        if peak is None:
             peak = self.snr_max()
-        else:
-            peak = [0., self.planet.Kp.value] # expected vrest, Kp of Planet
             
         
         indv = np.abs(self.vrestVec - peak[0]).argmin()
         indh = np.abs(self.kpVec - peak[1]).argmin()
+        self.peak_snr = self.snr[indh,indv]
     
         row = self.kpVec[indh]
         col = self.vrestVec[indv]
@@ -255,16 +265,21 @@ class KpV:
         line_args = {'ls':':', 'c':'white','alpha':0.35,'lw':'3.'}
         ax1.axhline(y=row, **line_args)
         ax1.axvline(x=col, **line_args)
-        ax1.scatter(col, row, marker='*', c='red',label='SNR = {:.2f}'.format(self.snr[indh,indv]))
+        ax1.scatter(col, row, marker='*', c='red',label='SNR = {:.2f}'.format(self.peak_snr))
         ax1.legend()
     
         ax1.set(xlabel='Vrest (km/s)', ylabel='Kp (km/s)')
+
         if title != None:
             fig.suptitle(title, x=0.45, y=0.915, fontsize=14)
     
         if outname != None:
             fig.savefig(outname, dpi=200, bbox_inches='tight', facecolor='white')
-        return fig
+        return self
+    
+    def copy(self):
+        from copy import deepcopy
+        return deepcopy(self)
 
 
     
@@ -277,6 +292,11 @@ class Template:
         else:
             self.wlt = wlt
             self.flux = flux
+            
+    def plot(self, ax=None, **kwargs):
+        ax = ax or plt.gca()
+        ax.plot(self.wlt, self.flux, **kwargs)
+        return ax
         
     def check_data(self):
         cenwave = np.median(self.wlt)

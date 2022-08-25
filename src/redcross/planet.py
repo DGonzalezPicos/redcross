@@ -6,44 +6,53 @@ from astropy import units as u, coordinates as coord
 from scipy.interpolate import interp1d
 class Planet:
     
-    def __init__(self, name=None, P=None, a=None, i=None, Tc=None, v_sys=None, **header):
+    def __init__(self, name=None, **header):
         if name == 'wasp189':
-            self.P = 2.724 # d
+            self.P = 2.7240338 # d
             self.a = 0.0497 # AU
             self.i = 84.32 # deg
             self.Tc = Time(2456706.4558, format='jd', scale='tdb')
             self.v_sys = -20.82 #km/s
-            self.RA_DEG = 225.68695
-            self.DEC_DEG = -3.0313833333333333
+
         else:
-            self.P = P
-            self.a = a
-            self.i = i
-            self.Tc = Time(Tc, format='mjd', scale='tdb')
-            self.v_sys = v_sys
-        self.v_orb = (2*np.pi*self.a*u.AU / (self.P*u.d)).to(u.km/u.s)
-        self.Kp = self.v_orb / np.sin(np.radians(self.i))
-        
+            pvalues = np.loadtxt(name)
+            keys = ['P','a', 'i', 'v_sys', 'Tc_jd', 'T_14']
+            for key, value in zip(keys, pvalues):
+                setattr(self, key, value)
+                
+            self.Tc = Time(self.Tc_jd, format='jd',scale='tdb') 
+                            
         for key in header:
             setattr(self, key, header[key])
 
-        
-    def mjd_to_bjd(self, target):
-        from astropy.coordinates import EarthLocation
-        #Convert MJD to BJD to account for light travel time. Adopted from Astropy manual.
-        orm = EarthLocation.of_site('Roque de los Muchachos')  # download site data
-        t = Time(self.MJD, format='mjd',scale='tdb',location=orm) 
-        ltt_bary = t.light_travel_time(target)
-        return t.tdb + ltt_bary # = BJD   
+        self.v_orb = (2*np.pi*self.a*u.AU / (self.P*u.d)).to(u.km/u.s)
+        self.Kp = self.v_orb / np.sin(np.radians(self.i))
+
     @property
-    def phase(self):
-        from astropy.coordinates import SkyCoord
-        obj_coord = SkyCoord(self.RA_DEG,
+    def BJD(self, location='orm'):
+        '''convert MJD to BJD'''
+        from astropy.coordinates import SkyCoord, EarthLocation
+        if location == 'orm':
+            self.location = EarthLocation.of_site('Roque de los Muchachos')  # download site data
+        else:
+            try:
+                self.location = EarthLocation.of_site(location) 
+            except:
+                print('Please provide a valid astropy EarthLocation quantity!')
+            
+        target = SkyCoord(self.RA_DEG,
                                    self.DEC_DEG,unit=(u.deg, u.deg), 
                                    frame='icrs')
         
-        # return ((self.mjd_to_bjd(obj_coord)-Tc).value % self.P) / self.P
-        return ((self.mjd_to_bjd(obj_coord)-self.Tc).value % self.P) / self.P
+        #Convert MJD to BJD to account for light travel time. Adopted from Astropy manual.
+#        print(self.location.geodetic)
+        t = Time(self.MJD, format='mjd',scale='tdb',location=self.location) 
+        ltt_bary = t.light_travel_time(target)
+        return t.tdb + ltt_bary # = BJD  
+    
+    @property
+    def phase(self):
+        return ((self.BJD-self.Tc).value % self.P) / self.P
     
     @property
     def RV(self):
@@ -64,26 +73,35 @@ class Planet:
         
         return self
     
-    def mask_eclipse(self, t_14=0.18, debug=False):
+    def mask_eclipse(self, invert_mask=False, return_mask=False, debug=False):
         '''given the duration of eclipse `t_14` in days
        return the PLANET with the frames masked'''
       
         shape_in = self.RV.size
         phase = self.phase
-        phase_14 = (t_14 % self.P) / self.P
+        phase_14 = ((self.T_14/24.) % self.P) / self.P
         
         mask = (phase > (0.50 - (0.5*phase_14)))*(phase < (0.50 + (0.5*phase_14)))
-        
-        # Update planet header with the MASKED vectors
-        for key in ['MJD','BERV','airmass']:
-            # self.header[item] = self.header[item][~mask]
-            setattr(self, key, getattr(self, key)[~mask])    
+        if invert_mask:
+            mask = ~mask
+    
         
         if debug:
             print('Original self.shape = {:}'.format(shape_in))
             print('After ECLIPSE masking = {:}'.format(self.RV.size))
-        
-        return self
+            
+        if return_mask:
+            return mask
+        else:
+            # Update planet header with the MASKED vectors
+            for key in ['MJD','BERV','airmass']:
+                # self.header[item] = self.header[item][~mask]
+                setattr(self, key, getattr(self, key)[~mask])
+            return self
+    
+    def copy(self):
+        from copy import deepcopy
+        return deepcopy(self)
 
     
 

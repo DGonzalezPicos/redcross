@@ -119,8 +119,9 @@ def read_harpsn(files, filetype='s1d', max_files=1000):
             if filetype == 'e2ds':
 #                 norders=np.append(norders,hdr['NAXIS2'])        
                 wavedata=airtovac(read_wave_from_e2ds_header(hdr,mode='HARPSN')) # Angstrom
-                beta = (1.0-(hdr[bervkeyword]*u.km/u.s/const.c).decompose().value) #Doppler factor BERV.
-                wlt.append(wavedata*beta)
+#                beta = (1.0-(hdr[bervkeyword]*u.km/u.s/const.c).decompose().value) #Doppler factor BERV.
+#                wlt.append(wavedata*beta)
+                wlt.append(wavedata)  # DON'T APPLY BERV here
                 
             elif filetype == 's1d':
                 
