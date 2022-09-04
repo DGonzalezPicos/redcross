@@ -12,8 +12,10 @@ class SysRem:
         self.r_ij  = datacube.flux[:,~self.nans]
         self.r_ij = (self.r_ij.T - np.nanmedian(self.r_ij, axis=1)).T
         
-        if datacube.flux_err is None:
+        if datacube.flux_err is None: # IMPORTANT STEP
             datacube.estimate_noise()
+            
+#        datacube.estimate_noise()   
             
         self.sigma_ij = datacube.flux_err[:,~self.nans]
         self.err2 = self.sigma_ij**2
@@ -30,13 +32,13 @@ class SysRem:
     def compute_c(self, a=None):   
         if a is None:
             a = self.a_j
-        c = np.sum( ((self.r_ij/self.err2).T * a).T, axis=0) / np.sum( (a**2 * (1/self.err2).T).T, axis=0 )
+        c = np.nansum( ((self.r_ij/self.err2).T * a).T, axis=0) / np.nansum( (a**2 * (1/self.err2).T).T, axis=0 )
         return c  
 
     def compute_a(self, c):
         if c is None:
             c = self.compute_c()
-        return np.sum(self.r_ij / self.err2 * c, axis=1) / np.sum( c**2 * (1/self.err2), axis=1 )
+        return np.nansum(self.r_ij / self.err2 * c, axis=1) / np.nansum( c**2 * (1/self.err2), axis=1 )
     
     def run(self, n=6, mode='subtract', debug=False):
         ''''Run SysRem for `n` cycles
@@ -82,7 +84,7 @@ class SysRem:
             self.r_ij -= m
             
         if debug: 
-            std = np.nanmean(np.std(self.r_ij, axis=1))
+            std = np.nanmean(np.nanstd(self.r_ij, axis=1))
             print('Convergence at iteration {:3} --- StDev = {:.4f}'.format(self.last_ac_iteration, std))
     
             
@@ -109,14 +111,14 @@ class SysRem:
 #        correction0 = correction
 #        # Sysrem Algorithm 
 #        c_i = np.nansum((r_ij/err2).T*a_j, axis=1) / np.nansum((a_j**2/err2.T), axis=1)
-#        if np.isnan(np.sum(c_i)):
+#        if np.isnan(np.nansum(c_i)):
 #            print('NaN in c_i...')
 #            return (dc, a_j)
 #        a_j = np.nansum(r_ij*c_i/err2, axis=1) / np.nansum(c_i**2/err2, axis=1)
 #
 #        
 #        correction = np.outer(a_j, c_i)
-#        fractional_dcorr = np.sum(np.abs(correction-correction0))/(np.sum(np.abs(correction0))+1e-5)
+#        fractional_dcorr = np.nansum(np.abs(correction-correction0))/(np.nansum(np.abs(correction0))+1e-5)
 #        # if (j%50)==0:
 #        #     print(j, fractional_dcorr)
 #        if j>1 and fractional_dcorr< 1e-2:
@@ -150,7 +152,7 @@ class SysRem:
 #   for i in range(1,N+1):
 #       dc_sys, a_j = SysRem1(dc, a_j, mode=mode, debug=debug)
 #       if debug:
-#           Q = 1/np.nanmean(np.std(dc_sys.flux[:,~nans], axis=1))
+#           Q = 1/np.nanmean(np.nanstd(dc_sys.flux[:,~nans], axis=1))
 #           print('Sysrem {:}/{:} --- Q = {:.3f}'.format(i,N, Q))
 #           
 #

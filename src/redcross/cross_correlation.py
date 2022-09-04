@@ -95,30 +95,33 @@ class CCF(Datacube):
             self.template.flux_interp1d[i,:] = splev(new_wlt, cs)
         return self
     
-#    def mask_eclipse(self, planet, t_14=0.18, debug=False):
-#        '''given the planet PHASE and duration of eclipse `t_14` in days
-#        return the datacube with the frames masked'''
-#        shape_in = self.shape
-#        phase = planet.phase
-#        phase_14 = (t_14 % planet.P) / planet.P
-#    
-#        mask = (phase > (0.50 - (0.50*phase_14)))*(phase < (0.50 + (0.50*phase_14)))
-#        self.flux = self.flux[~mask,:]
-#      
-#        if debug:
-#            print('Original self.shape = {:}'.format(shape_in))
-#            print('After ECLIPSE masking self.shape = {:}'.format(self.shape))
-#                        
-#        return self
+    def mask_eclipse(self, planet, debug=False):
+        '''given the planet PHASE and duration of eclipse `t_14` in days
+        return the datacube with the frames masked'''
+        shape_in = self.shape
+        phase = planet.phase
+        phase_14 = (planet.T_14 % planet.P) / planet.P
     
-    def to_planet_frame(self, planet):
+        mask = np.abs(phase - 0.50) < (phase_14/2.) # frames IN-eclipse
+        print(phase_14)
+#        mask = (phase > (0.50 - (0.50*phase_14)))*(phase < (0.50 + (0.50*phase_14)))
+        self.flux = self.flux[~mask,:]
+      
+        if debug:
+            print('Original self.shape = {:}'.format(shape_in))
+            print('After ECLIPSE masking self.shape = {:}'.format(self.shape))
+                        
+        return self
+    
+    def to_planet_frame(self, planet, ax=None):
         ccf = self.copy()
         for i in range(self.nObs):
             cs = splrep(ccf.rv, ccf.flux[i,])
             ccf.flux[i,] = splev(ccf.rv+planet.RV.value[i], cs)
-        mask = (np.abs(ccf.rv)<150)
+        mask = (np.abs(ccf.rv)<np.percentile(np.abs(ccf.rv), 50))
         ccf.rv = ccf.rv[mask]
         ccf.flux = ccf.flux[:,mask]
+        if ax != None: ccf.imshow(ax=ax)
         return ccf
     
 
@@ -133,18 +136,20 @@ class KpV:
         self.vrestVec = np.arange(-vrest[0], vrest[0]+vrest[1], vrest[1])
         self.bkg = bkg
         
-    def run(self, snr=True, ignore_eclipse=False):
+    def run(self, snr=True, ignore_eclipse=False, ax=None):
         '''Generate a Kp-Vsys map
         if snr = True, the returned values are SNR (background sub and normalised)
         else = map values'''
-        
-        # if self.planet.RV.size != self.ccf.shape[0]:
-        #     print('Interpolate planet...')
-        #     newX = np.arange(0, self.ccf.shape[0],1)
-        #     self.planet = self.planet.interpolate(newX)
+    
+             
         if ignore_eclipse:   
             self.ccf.mask_eclipse(self.planet)
             self.planet.mask_eclipse(debug=True) ## TESTING
+            
+#        if self.planet.RV.size != self.ccf.shape[0]:
+#            print('Interpolate planet...')
+#            newX = np.arange(0, self.ccf.shape[0],1)
+#            self.planet = self.planet.interpolate(newX)
         
             
         snr_map = np.zeros((len(self.kpVec), len(self.vrestVec)))
@@ -164,6 +169,7 @@ class KpV:
             self.snr = snr_map / noise_map
         else:
             self.snr = snr_map # NOT ACTUAL SIGNAL-TO-NOISE ratio (useful for computing weights)
+        if ax != None: self.imshow(ax=ax)
         return self
     def snr_max(self, display=False):
         # Locate the peak
@@ -250,14 +256,14 @@ class KpV:
             
         
         indv = np.abs(self.vrestVec - peak[0]).argmin()
-        indh = np.abs(self.kpVec - peak[1]).argmin()
-        self.peak_snr = self.snr[indh,indv]
+        self.indh = np.abs(self.kpVec - peak[1]).argmin()
+        self.peak_snr = self.snr[self.indh,indv]
     
-        row = self.kpVec[indh]
+        row = self.kpVec[self.indh]
         col = self.vrestVec[indv]
         print('Horizontal slice at Kp = {:.1f} km/s'.format(row))
         print('Vertical slice at Vrest = {:.1f} km/s'.format(col))
-        ax2.plot(self.vrestVec, self.snr[indh,:], 'gray')
+        ax2.plot(self.vrestVec, self.snr[self.indh,:], 'gray')
         ax3.plot(self.snr[:,indv], self.kpVec,'gray')
         
         
@@ -362,3 +368,57 @@ class Template:
         lowpass = ndimage.gaussian_filter1d(self.flux, window)
         self.flux /= lowpass
         return self
+    
+    def copy(self):
+        return deepcopy(self)
+    
+    
+    def remove_continuum(self, exclude=None, wave_units=u.AA, ax=None):
+        from specutils.spectra import Spectrum1D, SpectralRegion
+        from specutils.fitting import fit_generic_continuum
+        from astropy import units as u
+        
+        
+        spectrum = Spectrum1D(flux=self.flux*u.Jy, spectral_axis=self.wlt*u.AA)
+        if exclude != None:
+            exclude_region = SpectralRegion(exclude[0]*wave_units, exclude[1]*wave_units)
+        else:
+            exclude_region = None
+        
+        g1_fit = fit_generic_continuum(spectrum, exclude_regions=exclude_region)
+        y_continuum_fitted = g1_fit(self.wlt*wave_units)
+        if ax != None:
+            self.plot(ax=ax, lw=0.2, label='Template')
+            ax.plot(self.wlt, y_continuum_fitted, label='Fitted continuum')
+            ax.legend()
+            plt.show()
+            
+        
+        self.flux /= y_continuum_fitted.value
+        return self
+    
+    def convolve_instrument(self, res=50e3):
+        '''convolve to instrumental resolution with a Gaussian kernel'''
+        from astropy.convolution import Gaussian1DKernel, convolve
+        
+        cenwave = np.median(self.wlt)
+        # Create kernel
+        g = Gaussian1DKernel(stddev=0.5*cenwave/res) # set sigma = FWHM / 2. = lambda / R
+        self.flux = convolve(self.flux, g)
+        return self
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    

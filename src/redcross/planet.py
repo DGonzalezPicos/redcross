@@ -6,24 +6,28 @@ from astropy import units as u, coordinates as coord
 from scipy.interpolate import interp1d
 class Planet:
     
-    def __init__(self, name=None, **header):
-        if name == 'wasp189':
+    def __init__(self, name=None, file=None, **header):
+        if name == 'WASP189':
             self.P = 2.7240338 # d
             self.a = 0.0497 # AU
             self.i = 84.32 # deg
-            self.Tc = Time(2456706.4558, format='jd', scale='tdb')
+            self.Tc_jd = 2456706.4558
+            self.T_14 = 0.1813 * 24. # d
             self.v_sys = -20.82 #km/s
+            self.RA_DEG = 225.68695
+            self.DEC_DEG = -3.031383
 
-        else:
+        elif file != None:
             pvalues = np.loadtxt(name)
             keys = ['P','a', 'i', 'v_sys', 'Tc_jd', 'T_14']
             for key, value in zip(keys, pvalues):
                 setattr(self, key, value)
                 
-            self.Tc = Time(self.Tc_jd, format='jd',scale='tdb') 
-                            
         for key in header:
             setattr(self, key, header[key])
+            
+        self.Tc = Time(self.Tc_jd, format='jd',scale='tdb') 
+        if hasattr(self, 'T_14'): self.T_14 /= 24. # from hours to days
 
         self.v_orb = (2*np.pi*self.a*u.AU / (self.P*u.d)).to(u.km/u.s)
         self.Kp = self.v_orb / np.sin(np.radians(self.i))
@@ -79,16 +83,15 @@ class Planet:
       
         shape_in = self.RV.size
         phase = self.phase
-        phase_14 = ((self.T_14/24.) % self.P) / self.P
+        phase_14 = ((self.T_14) % self.P) / self.P
         
-        mask = (phase > (0.50 - (0.5*phase_14)))*(phase < (0.50 + (0.5*phase_14)))
+        mask = np.abs(phase - 0.50) < (phase_14/2.) # frames IN-eclipse
+#        mask = (phase > (0.50 - (0.5*phase_14)))*(phase < (0.50 + (0.5*phase_14)))
         if invert_mask:
             mask = ~mask
     
         
-        if debug:
-            print('Original self.shape = {:}'.format(shape_in))
-            print('After ECLIPSE masking = {:}'.format(self.RV.size))
+
             
         if return_mask:
             return mask
@@ -97,6 +100,10 @@ class Planet:
             for key in ['MJD','BERV','airmass']:
                 # self.header[item] = self.header[item][~mask]
                 setattr(self, key, getattr(self, key)[~mask])
+                
+            if debug:
+                print('Original self.shape = {:}'.format(shape_in))
+                print('After ECLIPSE masking = {:}'.format(self.RV.size))
             return self
     
     def copy(self):
