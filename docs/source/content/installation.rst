@@ -13,7 +13,7 @@ To install *redcross* via pip install just type
 in a terminal. 
 
 Downloading *redcross* from source
-_________________________
+__________________________________
 
 Download *redcross* from `Github <https://github.com/DGonzalezPicos/redcross>`_, or clone it from Github via
 

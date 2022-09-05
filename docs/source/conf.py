@@ -38,11 +38,12 @@ release = '0.1'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['autoapi', 'nbsphinx']
+#extensions = ['autoapi.extension', 'nbsphinx']
+extensions = ['nbsphinx']
 
-autoapi_type = 'python'
+#autoapi_type = 'python'
 
-autoapi_dirs = ['../../src/redcross']
+#autoapi_dirs = ['../../src/redcross']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['.templates']
