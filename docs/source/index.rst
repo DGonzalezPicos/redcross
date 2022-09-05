@@ -1,39 +1,35 @@
-.. redcross documentation master file, created by
-   sphinx-quickstart on Sun Jun 26 20:58:28 2022.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. redcross documentation master file
 
-Welcome to redcross's documentation!
-====================================
+redcross documentation
+=========================================
 
-**redcross** is a Python library for *reduction* and *cross-correlation* of high-resolution
-spectra of exoplanetary atmospheres. It includes a set of tools to read, visualise, reduce spectra,
-load atmospheric templates, compute cross-correlation functions and display results.
+Welcome to the **redcross** documentation. This open-source python package is build for **red**\ uction and **cross**\-correlation of high-resolution spectra for exoplanet atmospheres. It provides a flexible and fast object-oriented framework to *test reduction routines*, manipulate order-separated spectra and *compute cross-correlation functions (CCFs)*. In addition, it is a useful guide to understand and visualise every step of the reduction process directly on the 2D-datacubes.
 
 
-Check out the :doc:`usage` section for further information, including how to
-:ref:`install <installation>` the project.
+**In the `"Tutorial" <content/tutorial.html>`_ section one can find how to get started with some examples with HARPS-N and GIANO data.**
 
-.. note::
+*redcross* has been used to find atomic and molecular species in optical wavelengths (Fe in WASP-189b with HARPS-N) and in the infra-red (CO in WASP-189b and WASP-33b with GIANO)
 
-   This project is under active development.
+
+.. _contact: picos@mail.strw.leidenuniv.nl
+
+
+Developers
+___________
+
+- Darío González Picos
+
+
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Guide:
 
+   content/installation
+   content/tutorial
 
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-
-Contents
---------
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Code documentation:
 
-   usage

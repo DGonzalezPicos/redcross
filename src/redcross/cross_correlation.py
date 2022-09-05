@@ -11,6 +11,7 @@ class CCF(Datacube):
     mode = 'ccf'
     def __init__(self, rv=None, template=None, flux=None, **kwargs):
         self.rv = rv
+        self.dRV = np.mean(np.diff(self.rv)) # resolution
         self.template = template
         self.flux = flux
         
@@ -23,7 +24,7 @@ class CCF(Datacube):
         return self.rv
 
    
-    def run(self, dc, debug=False, weighted=False):
+    def run(self, dc, debug=False, weighted=False, ax=None):
         '''The data baseline must be around 1.0 while the template baseline must be 
         around zero.'''
         
@@ -31,41 +32,25 @@ class CCF(Datacube):
         nans = np.isnan(dc.wlt)
         self.flux = np.zeros((dc.nObs,len(self.rv)))    
         self.template_interp1d(dc.wlt[~nans])
-        self.template.flux_interp1d -= np.nanmean(self.template.flux_interp1d) # Additional step 18-02-2022
-        
-        # divide = dc.nObs * np.nanstd(dc.flux) * np.nanstd(self.template.flux_interp1d) # NEW 23-04-2022
-        std_flux = np.nanstd(dc.flux[:,~nans], axis=1)
-        std_temp = np.nanstd(self.template.flux_interp1d, axis=1)
-        # divide = std_flux*std_temp
-#        divide = np.outer(std_flux, std_temp)
-        divide = np.sum(self.template.flux)
-        # print('divide.shape = ', divide.shape)
+        self.template.flux_interp1d -= np.nanmean(self.template.flux_interp1d) 
         
         
         if weighted:
-            # nans = np.isnan(dc.flux_err)
-            # self.flux = np.dot(((dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans]))/ np.power(dc.flux_err[:,~nans],2)),self.template.flux_interp1d.T) # TESTING
-            
             data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
-#            noise2 = np.power(np.nanstd(dc.flux[:,~nans], axis=0),2)
             noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
-#            noise2 = np.power(dc.flux_err[:,~nans],2)
-#            noise2 = np.outer(np.std(data, axis=1), np.std(data, axis=0))
-#            noise2 = 1.+np.power(np.nanstd(dc.flux[:,~nans], axis=0),2)
-#            noise2 = 1.+ np.power(np.nanmedian(dc.flux_err[:,~nans], axis=0), 2)
             self.flux = np.dot(data/noise2, self.template.flux_interp1d.T) # TESTING
 
 
         else:
+            divide = np.sum(self.template.flux)
             self.flux = np.dot(dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans]), self.template.flux_interp1d.T) / divide
-            
-
-        # self.flux /= self.flux.max() ######## TESTING ######    
-        
+                    
         if debug:
             print('Max CCF value = {:.2f}'.format(self.flux.max()))
             print('Baseline CCF = {:.2f}'.format(np.median(self.flux)))
             print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
+            
+        if ax != None: self.imshow(ax=ax)
         return self
     
     def run_slow(self, dc):
@@ -129,11 +114,16 @@ class CCF(Datacube):
                 
                 
 class KpV:
-    def __init__(self, ccf=None, planet=None, kp=None, vrest=None, bkg=20):
+    def __init__(self, ccf=None, planet=None, deltaRV=None, 
+                 kp_radius=50., vrest_max=80., bkg=20):
         self.ccf = ccf.copy()
         self.planet = deepcopy(planet)
-        self.kpVec = self.planet.Kp.value + np.arange(-kp[0], kp[0], kp[1])
-        self.vrestVec = np.arange(-vrest[0], vrest[0]+vrest[1], vrest[1])
+#        self.kpVec = self.planet.Kp.value + np.arange(-kp[0], kp[0], kp[1])
+#        self.vrestVec = np.arange(-vrest[0], vrest[0]+vrest[1], vrest[1])
+        self.dRV = deltaRV or ccf.dRV
+
+        self.kpVec = self.planet.Kp.value + np.arange(-kp_radius, kp_radius, self.dRV)
+        self.vrestVec = np.arange(-vrest_max, vrest_max, self.dRV)
         self.bkg = bkg
         
     def run(self, snr=True, ignore_eclipse=False, ax=None):

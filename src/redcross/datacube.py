@@ -589,7 +589,7 @@ class Datacube:
 #        self.flux = SysRemRoutine(self, n, mode, debug)
 #        return self 
         
-    def sysrem(self, n=6, mode='subtract', weigh_cols=False, debug=False):
+    def sysrem(self, n=6, mode='subtract', weigh_cols=False, debug=False, ax=None):
         '''new sysrem implementation (august 25th 2022)'''
         from .sysrem import SysRem
 #        dco = self.copy()
@@ -607,6 +607,7 @@ class Datacube:
            # multiply to conserve total signal
             self.flux[:,~nans] *= mean_std
             self.flux_err[:,~nans] *= mean_std
+        if ax != None: self.imshow(ax=ax)
         return self 
     
     def reduce_orders(self, function, orders, num_cpus=4):
@@ -683,6 +684,15 @@ class Datacube:
                 self.flux_err = np.ones_like(self.flux)
             self.flux_err[order,:,:] = dco.flux_err
         return self
+    
+    def merge_orders(self):
+        '''merge data from different orders before computing CCF'''
+        dc = self.copy()
+        keys = ['wlt','flux']
+        if not dc.flux_err is None: keys.append('flux_err')
+        for key in keys:
+            setattr(dc, key, np.hstack(getattr(self, key)))
+        return dc
 #  
 #            
 if __name__ == '__main__':

@@ -34,10 +34,13 @@ class Pipeline:
                 
                 props = dict(boxstyle='round', facecolor='black', alpha=0.65)
 #                s = np.round(np.nanmean(np.nanstd(dco.flux, axis=0)), 4)
-                s = '$\sigma$ = {:.4f}'.format(np.nanstd(dco.flux))
-                x, y = 0.05, 0.70
-                ax[i+1].text(s=s, x=x, y=y, transform=ax[i+1].transAxes, c='white',
-                        fontsize=9, alpha=0.9,bbox=props)
+                
+                sigma = '$\sigma$ = {:.4f}'.format(np.nanstd(dco.flux))
+                x = [0.02, 0.90]
+                y = 0.70
+                for j,s in enumerate([fun, sigma]):
+                    ax[i+1].text(s=s, x=x[j], y=y, transform=ax[i+1].transAxes, c='white',
+                            fontsize=12, alpha=0.8,bbox=props)
             
         return dco
     

@@ -98,7 +98,7 @@ def read_wave_from_e2ds_header(h,mode='HARPS'):
     return(wave)
 
 
-def read_harpsn(files, filetype='s1d', max_files=1000):
+def read_harpsn(files, filetype='e2ds', max_files=1000):
     catkeyword = 'OBS-TYPE'
     bervkeyword = 'HIERARCH TNG DRS BERV'
 
