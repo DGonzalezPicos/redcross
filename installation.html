@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>redcross documentation &mdash; redcross 0.1 documentation</title>
+  <title>Installation &mdash; redcross 0.1 documentation</title>
       <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
       <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
   <!--[if lt IE 9]>
@@ -17,7 +17,8 @@
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Installation" href="installation.html" /> 
+    <link rel="next" title="Tutorial" href="tutorial.html" />
+    <link rel="prev" title="redcross documentation" href="index.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -25,7 +26,7 @@
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-            <a href="#" class="icon icon-home"> redcross
+            <a href="index.html" class="icon icon-home"> redcross
           </a>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
@@ -36,8 +37,12 @@
 </div>
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
               <p class="caption" role="heading"><span class="caption-text">Guide:</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#installation-via-pip-install">Installation via pip install</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#downloading-redcross-from-source">Downloading <em>redcross</em> from source</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="tutorial.html">Tutorial</a></li>
 </ul>
 
@@ -47,17 +52,17 @@
 
     <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
           <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
-          <a href="#">redcross</a>
+          <a href="index.html">redcross</a>
       </nav>
 
       <div class="wy-nav-content">
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="#" class="icon icon-home"></a> &raquo;</li>
-      <li>redcross documentation</li>
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>Installation</li>
       <li class="wy-breadcrumbs-aside">
-            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+            <a href="_sources/installation.rst.txt" rel="nofollow"> View page source</a>
       </li>
   </ul>
   <hr/>
@@ -65,31 +70,27 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <div class="section" id="redcross-documentation">
-<h1>redcross documentation<a class="headerlink" href="#redcross-documentation" title="Permalink to this headline"></a></h1>
-<p>Welcome to the <strong>redcross</strong> documentation. This open-source python package is build for <strong>red</strong>uction and <strong>cross</strong>-correlation of high-resolution spectra for exoplanet atmospheres. It provides a flexible and fast object-oriented framework to <em>test reduction routines</em>, manipulate order-separated spectra and <em>compute cross-correlation functions (CCFs)</em>. In addition, it is a useful guide to understand and visualise every step of the reduction process directly on the 2D-datacubes.</p>
-<p><strong>In the</strong> <a class="reference internal" href="tutorial.html"><span class="doc">Tutorial</span></a> <strong>section one can find how to get started with some examples with HARPS-N and GIANO data.</strong></p>
-<p><em>redcross</em> has been used to find atomic and molecular species in optical wavelengths (Fe in WASP-189b with HARPS-N) and in the infra-red (CO in WASP-189b and WASP-33b with GIANO)</p>
-<div class="section" id="developers">
-<h2>Developers<a class="headerlink" href="#developers" title="Permalink to this headline"></a></h2>
+  <div class="section" id="installation">
+<h1>Installation<a class="headerlink" href="#installation" title="Permalink to this headline"></a></h1>
+<div class="section" id="installation-via-pip-install">
+<h2>Installation via pip install<a class="headerlink" href="#installation-via-pip-install" title="Permalink to this headline"></a></h2>
+<p>To install <em>redcross</em> via pip install just type</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip install redcross
+</pre></div>
+</div>
+<p>in a terminal.</p>
+</div>
+<div class="section" id="downloading-redcross-from-source">
+<h2>Downloading <em>redcross</em> from source<a class="headerlink" href="#downloading-redcross-from-source" title="Permalink to this headline"></a></h2>
+<p>Download <em>redcross</em> from <a class="reference external" href="https://github.com/DGonzalezPicos/redcross">Github</a>, or clone it from Github via</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git clone https://github.com/DGonzalezPicos/redcross
+</pre></div>
+</div>
 <ul class="simple">
-<li><p>Darío González Picos</p></li>
+<li><p>In the terminal, enter the <em>redcross</em> folder</p></li>
+<li><p>Type the following in the terminal <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">setup.py</span> <span class="pre">install</span></code>, and press
+Enter.</p></li>
 </ul>
-<div class="toctree-wrapper compound">
-<p class="caption" role="heading"><span class="caption-text">Guide:</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-via-pip-install">Installation via pip install</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#downloading-redcross-from-source">Downloading <em>redcross</em> from source</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="tutorial.html">Tutorial</a><ul class="simple">
-</ul>
-</li>
-</ul>
-</div>
-<div class="toctree-wrapper compound">
-</div>
 </div>
 </div>
 
@@ -97,7 +98,8 @@
            </div>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
-        <a href="installation.html" class="btn btn-neutral float-right" title="Installation" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="index.html" class="btn btn-neutral float-left" title="redcross documentation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="tutorial.html" class="btn btn-neutral float-right" title="Tutorial" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

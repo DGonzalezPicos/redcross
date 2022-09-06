@@ -1,6 +1,0 @@
-add_one
-=======
-
-.. currentmodule:: my_package.example
-
-.. autofunction:: add_one

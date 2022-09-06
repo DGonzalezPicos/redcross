@@ -1,67 +1,35 @@
-.. my_package documentation master file, created by
-   sphinx-quickstart on Tue Mar 22 13:13:41 2022.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. redcross documentation master file
 
-Welcome to my_package's documentation!
-======================================
+redcross documentation
+=========================================
+
+Welcome to the **redcross** documentation. This open-source python package is build for **red**\ uction and **cross**\-correlation of high-resolution spectra for exoplanet atmospheres. It provides a flexible and fast object-oriented framework to *test reduction routines*, manipulate order-separated spectra and *compute cross-correlation functions (CCFs)*. In addition, it is a useful guide to understand and visualise every step of the reduction process directly on the 2D-datacubes.
+
+
+**In the** :any:`tutorial` **section one can find how to get started with some examples with HARPS-N and GIANO data.**
+
+*redcross* has been used to find atomic and molecular species in optical wavelengths (Fe in WASP-189b with HARPS-N) and in the infra-red (CO in WASP-189b and WASP-33b with GIANO)
+
+
+.. _contact: picos@mail.strw.leidenuniv.nl
+
+
+Developers
+___________
+
+- Darío González Picos
+
+
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Guide:
+
+   installation
+   tutorial
 
 
-Here is where you can write the documentation for your package. 
+.. toctree::
+   :maxdepth: 2
+   :caption: Code documentation:
 
-
-Usage
-=====
-
-.. _installation:
-
-Installation
-------------
-
-To use `my_package` you need to install X, Y and Z. 
-
-
-.. _code:
-
-Code
-----
-
-Here is an example of describing the use of your function.
-
-To add one to a number you can use the ``my_package.add_one()`` function:
-
-.. py:function:: my_package.add_one(number)
-
-
-    :param number: Should be integer, floating point number or a string. 
-
-    If ``number`` is not one of these types, an exception will be raised:
-
-    .. py:exception:: TypeError
-
-   Raised if the input is invalid.
-
-More about how to describe code can be hound 
-`here <https://www.sphinx-doc.org/en/master/tutorial/describing-code.html>`_
-
-
-..
-  The following section creates an index, a list of modules and a 
-  search page. 
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
-
-..
- The following will add the signature of the individual functions and pull
- their docstrings.
-
-.. automodapi:: my_package.example
