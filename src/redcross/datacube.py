@@ -265,6 +265,7 @@ class Datacube:
         while k < cycles:
             if mode == 'flux':
                 y = np.nanstd(self.flux, axis=0)
+                
             elif mode == 'flux_err':
                 if self.flux_err is None:
                     self.estimate_noise()
@@ -275,7 +276,6 @@ class Datacube:
             # mask += nans
             n = mask.size
             frac_masked = mask[mask==True].size*100/n
-            print(k)
             if frac_masked > 15.: # control point: don't apply masking if it affects more than 15% of data
                 sigma *= 1.2 # increase by 20% and try again
                 print('--> {:.2f} % pixels to mask...'.format(frac_masked))
@@ -291,9 +291,11 @@ class Datacube:
     
 
             if frac_masked > 10.: # control point to avoid over-masking with more iterations
-                print('** Exit at iteration {:} **'.format(k))
-                print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
-                return self
+                if debug:
+                    print('** Exit at iteration {:} **'.format(k))
+                    print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
+            return self
+        
             if debug:  
                 n = mask.size
                 print('--> {:.2f} % of pixels masked <--'.format(frac_masked))

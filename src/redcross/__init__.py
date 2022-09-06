@@ -1,5 +1,6 @@
 from .datacube import Datacube
 from .cross_correlation import CCF, KpV, Template
+from .planet import Planet
 from .read import read_harpsn, read_giano
 from .pipeline import Pipeline
 __author__ = 'Darío González Picos'
