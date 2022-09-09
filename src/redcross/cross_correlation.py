@@ -353,8 +353,11 @@ class Template:
       return self  
 
 
-    def high_pass_gaussian(self, window):
+    def high_pass_gaussian(self, window=None, dRV=0.):
         from scipy import ndimage
+        if dRV > 0.:
+            pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
+            window = dRV * pixscale
         lowpass = ndimage.gaussian_filter1d(self.flux, window)
         self.flux /= lowpass
         return self

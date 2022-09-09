@@ -15,7 +15,7 @@ class Planet:
             self.T_14 = 0.1813 * 24. # d
             self.v_sys = -20.82 #km/s
             self.RA_DEG = 225.68695
-            self.DEC_DEG = -3.031383
+            self.DEC_DEG = -3.0313833
 
         elif file != None:
             pvalues = np.loadtxt(name)

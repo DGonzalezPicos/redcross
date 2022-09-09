@@ -9,7 +9,17 @@ import astropy.units as u
 import astropy.constants as const
 import os, copy
 
-def read_giano(files):
+def read_giano(files, cache=False):
+    
+    
+    data_dir = files[0].split('GIANO')[0]
+    dc_file = data_dir+'datacube_raw.npy'
+    if cache:
+    # check if preloaded file exists on the given directory
+        if os.path.exists(dc_file):
+            return Datacube().load(dc_file)
+        else:
+            print('No preloaded datacube file found...')
     # read the cube's parameters from a sample file
     hdul = fits.open(os.path.join(files[0]))
     hdr = hdul[0].header
@@ -50,6 +60,7 @@ def read_giano(files):
                 'RA_DEG':hdr['RA-DEG'], 'DEC_DEG':hdr['DEC-DEG'], 'DATE':hdr['DATE-OBS']}
 
     dc = Datacube(flux=np.swapaxes(flux, 0, 1), wlt=np.swapaxes(wlt, 0, 1), flux_err=np.swapaxes(snr, 0, 1), **info)  
+    if cache: dc.save(dc_file)
     return dc
 
 def airtovac(wlA):
@@ -59,11 +70,12 @@ def airtovac(wlA):
     0.0001599740894897 / (38.92568793293 - s**2))
     return(wlA*n)
 
-def read_wave_from_e2ds_header(h,mode='HARPS'):
+def read_wave_from_e2ds_header(h,mode='HARPS', cache=False):
     """
     This reads the wavelength solution from the HARPS header keywords that
     encode the coefficients as a 4-th order polynomial.
     """
+
     if mode not in ['HARPS','HARPSN','HARPS-N','UVES']:
         raise ValueError("in read_wave+from_e2ds_header: mode needs to be set to HARPS, HARPSN or UVES.")
     npx = h['NAXIS1']
@@ -98,7 +110,19 @@ def read_wave_from_e2ds_header(h,mode='HARPS'):
     return(wave)
 
 
-def read_harpsn(files, filetype='e2ds', max_files=1000):
+def read_harpsn(files, filetype='e2ds', max_files=1000, cache=False):
+    
+    
+    data_dir = files[0].split('HARPN')[0]
+    dc_file = data_dir+'datacube_raw.npy'
+    if cache:
+    # check if preloaded file exists on the given directory
+        if os.path.exists(dc_file):
+            return Datacube().load(dc_file)
+        else:
+            print('No preloaded datacube file found...')
+
+    
     catkeyword = 'OBS-TYPE'
     bervkeyword = 'HIERARCH TNG DRS BERV'
 
@@ -133,6 +157,7 @@ def read_harpsn(files, filetype='e2ds', max_files=1000):
            'RA_DEG':hdr['RA-DEG'], 'DEC_DEG':hdr['DEC-DEG'], 'DATE':hdr['DATE-OBS']}
     dc = Datacube(flux=np.swapaxes(flux, 0, 1), wlt=np.swapaxes(wlt, 0, 1), **info)  
 
+    if cache: dc.save(dc_file)
     return dc
 
 

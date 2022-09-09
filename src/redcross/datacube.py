@@ -384,12 +384,15 @@ class Datacube:
 
     
     
-    def high_pass_gaussian(self, window=15, mode='subtract', ax=None):
+    def high_pass_gaussian(self, window=15, mode='subtract', dRV=0., ax=None):
         '''Apply a High-Pass Gaussian filter by subtracting a Low-Pass filter from the Data
         Pass the window in units of pixels. Blur only along the wavelength dimension (axis=1)'''
         from scipy import ndimage
 
         nans = np.isnan(self.wlt)
+        if dRV > 0.:
+            pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
+            window = 2 * dRV * pixscale
         
         lowpass = ndimage.gaussian_filter(self.flux[:,~nans], [0, window])
         if mode=='divide':
