@@ -26,11 +26,12 @@ class Planet:
         for key in header:
             setattr(self, key, header[key])
             
-        self.Tc = Time(self.Tc_jd, format='jd',scale='tdb') 
+        if hasattr(self, 'Tc_jd'): self.Tc = Time(self.Tc_jd, format='jd',scale='tdb') 
         if hasattr(self, 'T_14'): self.T_14 /= 24. # from hours to days
 
-        self.v_orb = (2*np.pi*self.a*u.AU / (self.P*u.d)).to(u.km/u.s)
-        self.Kp = self.v_orb / np.sin(np.radians(self.i))
+        if hasattr(self, 'a'):
+            self.v_orb = (2*np.pi*self.a*u.AU / (self.P*u.d)).to(u.km/u.s)
+            self.Kp = self.v_orb * np.sin(np.radians(self.i))
 
     @property
     def BJD(self, location='orm'):
@@ -110,57 +111,14 @@ class Planet:
         from copy import deepcopy
         return deepcopy(self)
 
+    def save(self, outname):
+        np.save(outname, self.__dict__) 
+        print('{:} saved...'.format(outname))
+        return None
     
-
-
-if __name__ == '__main__':     
-    from datacube import Datacube, CCF, Template
-    import glob
-    
-    
-    template_file = glob.glob('data/*.fits')[0]
-    template = Template(template_file).check_data()
-    dc = Datacube().load('dc_raw-nObs297.npy', 'full').crop([6450,6550])
-    planet = Planet('wasp189', **dc.header)
-
-    def vactoair(wavelength):
-        """VACUUM to AIR conversion as actually implemented by wcslib.
-        Input wavelength with astropy.unit
-        """
-        wave = wavelength.to(u.m).value
-        n = 1.0
-        for k in range(4):
-            s = (n/wave)**2
-            n = 2.554e8 / (0.41e14 - s)
-            n += 294.981e8 / (1.46e14 - s)
-            n += 1.000064328
-        return (wavelength / n).value
-    
-    def airtovac(wlA):
-        #Convert wavelengths (AA) in air to wavelengths (AA) in vaccuum (empirical).
-        s = 1e4 / wlA
-        n = 1 + (0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s**2) +
-        0.0001599740894897 / (38.92568793293 - s**2))
-        return(wlA*n)
-    
-    fig, ax = plt.subplots(3,1, figsize=(10,9))
-    ax[0].plot(template.wlt, template.flux, label='original')
-    ax[0].plot(vactoair(template.wlt*u.AA), template.flux, label='airtovac')
-    
-    shift = (vactoair(template.wlt*u.AA) - template.wlt) / template.wlt
-    ax[1].plot(template.wlt,shift, '-g')
-    ax[1].set(xlabel='Wavelength (A)', ylabel='Relative wavelength shift')
-    
-    ax[0].grid()
-    ax[0].set_xlim(5000,5010)
-    ax[0].set(xlabel='Wavelength (A)', ylabel='Flux')
-    ax[0].legend()
-    
-    
-    rv_shift = (np.mean(shift)* const.c).to('km/s').value
-    print('RV-shift from VAC-to-AIR transformation {:.2f} km/s'.format(rv_shift))
-    ax[2].plot(planet.RV, planet.phase, label='original')
-    ax[2].plot(planet.RV.value+rv_shift, planet.phase, label='shifted {:.2f} km/s'.format(rv_shift))
-    ax[2].legend()
-    ax[2].set(xlabel='RV (km/s)', ylabel='Phase')
-    plt.show()
+    def load(self, path):
+        print('Loading Datacube from...', path)
+        d = np.load(path, allow_pickle=True).tolist()
+        for key in d.keys():
+            setattr(self, key, d[key])
+        return self    

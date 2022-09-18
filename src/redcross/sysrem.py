@@ -1,32 +1,37 @@
 import numpy as np
-#from .datacube import Datacube
+#from .dco import dco
 
 
 class SysRem:
     '''SysRem implementation adapted from PyAstronomy: 
         https://github.com/sczesla/PyAstronomy/blob/03720761a3ad8fd8f59b8bb5798a1b1cd5218f71/src/pyasl/asl/aslExt_1/sysrem.py'''
     
-    def __init__(self, datacube, a_j=None):
+    def __init__(self, dco, a_j=None):
         
-        self.nans = np.isnan(datacube.wlt)
-        self.r_ij  = datacube.flux[:,~self.nans]
+        self.dco = dco
+        self.nans = np.isnan(dco.wlt)
+        self.r_ij  = np.array(dco.flux[:,~self.nans], dtype=np.float32)
         self.r_ij = (self.r_ij.T - np.nanmedian(self.r_ij, axis=1)).T
+        self.sysrem_model = np.zeros_like(self.r_ij) # for Gibson method
+        self.o = dco.o
         
-        if datacube.flux_err is None: # IMPORTANT STEP
-            datacube.estimate_noise()
+        if dco.flux_err is None: # IMPORTANT STEP
+            dco.estimate_noise()
             
-#        datacube.estimate_noise()   
+#        dco.estimate_noise()   
             
-        self.sigma_ij = datacube.flux_err[:,~self.nans]
-        self.err2 = self.sigma_ij**2
+        self.sigma_ij = np.array(dco.flux_err[:,~self.nans], dtype=np.float32)
+        zero_mask = self.sigma_ij==0.
+        self.sigma_ij[zero_mask] = np.median(self.sigma_ij[~zero_mask])
+        self.err2 = np.power(self.sigma_ij, 2, dtype=np.float32)
         
         if a_j is None:
-            self.a_j = np.ones_like(self.r_ij.shape[0])
+            self.a_j = np.ones_like(self.r_ij.shape[0], dtype=np.float32)
             
         # parameters for convergence
         self.max_iter = 1000  # maximum iterations for each sysrem component
-        self.atol = 1e-3 # absolute tolerance
-        self.rtol = 0 # relative tolerance
+        self.atol = 1e-2 # absolute tolerance
+        self.rtol = 0.0 # relative tolerance
         
 
     def compute_c(self, a=None):   
@@ -38,13 +43,19 @@ class SysRem:
     def compute_a(self, c):
         if c is None:
             c = self.compute_c()
-        return np.nansum(self.r_ij / self.err2 * c, axis=1) / np.nansum( c**2 * (1/self.err2), axis=1 )
+        return np.nansum(c*self.r_ij / self.err2 , axis=1) / np.nansum( c**2/self.err2, axis=1 )
     
-    def run(self, n=6, mode='subtract', debug=False):
+    def run(self, n=6, mode='subtract', debug=False, outdir=None):
         ''''Run SysRem for `n` cycles
         r_ij values are updated inside the function'''
         for i in range(n):
+#            print('Order {:} -- iteration {:}'.format(self.o, i))
+            if outdir != None:
+                self.dco.flux[:,~self.nans] = self.r_ij
+                np.save('{:}/order{:}/sysrem{:}.npy'.format(outdir,self.o, i), {'wlt':self.dco.wlt, 'flux':self.dco.flux})
+                
             self.iterate_ac(mode, debug)
+
         return self
 
     
@@ -53,9 +64,12 @@ class SysRem:
         a = self.a_j
         # First ac iteration
         c = self.compute_c()
-        a = self.compute_a(c)
+        a = self.compute_a(c) 
+        ## TESTING vvv##
+        a /= np.max(a) # avoid numerical problems (`a` gets large and  `c` gets veery small)
+#        c /= np.max(c)
         m = np.outer(a,c)
-        
+     
         converge = False
         for i in range(self.max_iter):
             m0 = m.copy()
@@ -72,7 +86,7 @@ class SysRem:
         self.last_ac_iteration = i
        
         if not converge:
-            print('WARNING: Convergence not reached after {:} iterations...'.format(self.max_iter))
+            print('WARNING for order {:}: Convergence not reached after {:} iterations...'.format(self.o, self.max_iter))
             
         # Store values in class instance
         self.a_j = a
@@ -80,8 +94,12 @@ class SysRem:
         if mode == 'divide':
             self.r_ij /= m
             self.sigma_ij /= m
-        if mode == 'subtract':
+        elif mode == 'subtract':
             self.r_ij -= m
+            
+        elif mode == 'gibson':
+            self.r_ij -= m
+            self.sysrem_model += m
             
         if debug: 
             std = np.nanmean(np.nanstd(self.r_ij, axis=1))

@@ -7,8 +7,11 @@ from copy import deepcopy
 import astropy.units as u
 import astropy.constants as const
 from astropy.convolution import Gaussian1DKernel, convolve_fft
-#from .cross_correlation import Template
-#from functions import fit_gaussian_lines
+import warnings
+warnings.simplefilter("ignore")
+# np.seterr(all="ignore")
+
+
 
 class Datacube:
     '''Main object to store, plot and work with data'''
@@ -64,7 +67,7 @@ class Datacube:
         return ax
         
 
-    def imshow(self, fig=None, ax=None, stretch=3.,**kwargs):
+    def imshow(self, fig=None, ax=None, stretch=3.,title='',**kwargs):
         
         # nans = np.isnan(self.wlt)
         if stretch > 0.:
@@ -84,8 +87,7 @@ class Datacube:
         
         current_cmap = plt.cm.get_cmap()
         current_cmap.set_bad(color='white')
-#        cmap = plt.cm.jet
-#        cmap.set_bad('white', 1.)
+        ax.set(title=title)
 
         return ax
     
@@ -120,7 +122,7 @@ class Datacube:
         0.0001599740894897 / (38.92568793293 - s**2))
         return(wlA*n)
     
-    def inject_signal(self, planet, template, factor=1.):
+    def inject_signal(self, planet, template, factor=1., ax=None):
         temp = deepcopy(template) # important
         
         beta = 1 - (planet.RV/const.c.to('km/s')).value
@@ -139,7 +141,8 @@ class Datacube:
             
             inject_flux = splev(wl_shift[exp], cs)
             self.flux[exp] *= inject_flux
-
+            
+        if ax != None: self.imshow(ax=ax)
         return self
     
     
@@ -161,6 +164,7 @@ class Datacube:
             # dco.order = orders
             if not dco.flux_err is None:
                 dco.flux_err = dco.flux_err[o,:,:]
+        dco.o = o # store order number
         return dco
  
     
@@ -190,7 +194,7 @@ class Datacube:
             for x in np.argwhere(nans==False):   
                 x = int(x)
                 mean, std = np.nanmean(flux[:,x]), np.nanstd(flux[:,x])
-                mask = (np.abs(flux[:,x]-mean) / std) > sigma
+                mask = np.abs(flux[:,x]-mean) > sigma*std
                 self.flux[mask,x] = mean
                 # self.flux[mask, x] = np.nan
                 if not self.flux_err is None:
@@ -212,7 +216,7 @@ class Datacube:
             print('outliers = {:.2e} %'.format(outliers/self.flux.size))
         return self
     
-    def remove_continuum(self, mode='polyfit', deg=3.):
+    def remove_continuum(self, mode='polyfit', deg=3., ax=None):
         '''for each order, remove the continuum by dividing by the residuals 
         from the master subtraction'''
         
@@ -235,7 +239,7 @@ class Datacube:
             for frame in range(self.shape[0]):
                 divide = convolve_fft((self.flux[frame,] / master), g1d_kernel, boundary='wrap')
                 self.flux[frame,] /= divide
-                
+        if ax != None: self.imshow(ax=ax)        
         return self
     
     def airmass_detrend(self, log_space=False, ax=None):
@@ -258,48 +262,123 @@ class Datacube:
                     self.flux_err[:,j] /= fit
         if ax != None: self.imshow(ax=ax)
         return self
+            
     
-    def mask_cols(self, sigma=3., mode='flux', cycles=1, nan=True, debug=False, ax=None):
+    def mask_cols(self, sigma=3., mode='flux', metric='mean', cycles=1, debug=False, ax=None):
+        '''
+         
+    
+         Parameters
+         ----------
+         sigma : float
+             NUmber of standard deviations. The default is 3..
+         mode : str, optional
+             Select data: 'flux' or 'flux_err'. The default is 'flux'.
+         metric : str, optional
+             Operation to perform on 'mode': 'mean' or 'std'. The default is 'mean'.
+         cycles : int, optional
+             Number of iterations. The default is 1.
+         debug : bool, optional
+             True to show what it is doing. The default is False.
+         ax : plt.ax(), optional
+             Show datacube after applying function. The default is None.
+    
+         Returns
+         -------
+         TYPE
+             Datacube()
+    
+         '''
+        
+
 
         k = 0
         while k < cycles:
-            if mode == 'flux':
-                y = np.nanstd(self.flux, axis=0)
-                
-            elif mode == 'flux_err':
-                if self.flux_err is None:
-                    self.estimate_noise()
-                y = np.nanstd(self.flux_err, axis=0)
-                
+            y = getattr(np, 'nan'+metric)(getattr(self, mode), axis=0)
             mean, std = np.nanmean(y), np.nanstd(y)
             mask = np.abs(y - mean) > (sigma * std)
-            # mask += nans
+        
             n = mask.size
             frac_masked = mask[mask==True].size*100/n
-            if frac_masked > 15.: # control point: don't apply masking if it affects more than 15% of data
+            
+            if frac_masked < 10.:
+                self.wlt[mask] = np.nan
+                self.flux[:,mask] = np.nan
+                if not self.flux_err is None:
+                    self.flux_err[:,mask] = np.nan 
+                
+                k += 1 # good job! go to next iteration
+            else:
                 sigma *= 1.2 # increase by 20% and try again
                 print('--> {:.2f} % pixels to mask...'.format(frac_masked))
                 print('--> Trying again with sigma = {:.1f}...'.format(sigma))
                 continue
             
-            self.wlt[mask] = np.nan
-            self.flux[:,mask] = np.nan
-            if not self.flux_err is None:
-                self.flux_err[:,mask] = np.nan 
+        if debug:  
+            n = mask.size
+            print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
                 
-            k += 1 # good job! go to next iteration
+        if ax != None: self.imshow(ax=ax)
+        return self
     
-
-            if frac_masked > 10.: # control point to avoid over-masking with more iterations
-                if debug:
-                    print('** Exit at iteration {:} **'.format(k))
-                    print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
-            return self
+#    def mask_cols(self, sigma=3., mode='flux', cycles=1, nan=True, debug=False, ax=None):
+#
+#        k = 0
+#        while k < cycles:
+#            if mode == 'flux':
+#                y = np.nanstd(self.flux, axis=0)
+#                
+#            elif mode == 'flux_err':
+#                if self.flux_err is None:
+#                    self.estimate_noise()
+#                y = np.nanstd(self.flux_err, axis=0)
+#                
+#            mean, std = np.nanmean(y), np.nanstd(y)
+#            mask = np.abs(y - mean) > (sigma * std)
+#
+#            n = mask.size
+#            frac_masked = mask[mask==True].size*100/n
+#            
+#            if frac_masked < 10.:
+#                self.wlt[mask] = np.nan
+#                self.flux[:,mask] = np.nan
+#                if not self.flux_err is None:
+#                    self.flux_err[:,mask] = np.nan 
+#                
+#                k += 1 # good job! go to next iteration
+#            else:
+#                sigma *= 1.2 # increase by 20% and try again
+#                print('--> {:.2f} % pixels to mask...'.format(frac_masked))
+#                print('--> Trying again with sigma = {:.1f}...'.format(sigma))
+#                continue
+#    
+#
+#            if (self.nan_frac*100) > 15.: # control point to avoid over-masking with more iterations
+##                if debug:
+##                    print('** Exit at iteration {:} **'.format(k))
+#                print('--> {:.2f} % of total pixels are masked <--'.format(self.nan_frac*100))
+#            return self
+#        
+#            if debug:  
+#                n = mask.size
+#                print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
+#                
+#        if ax != None: self.imshow(ax=ax)
+#        return self
+#    
+    def mask_sat_lines(self, sat=0.20, ax=None, debug=False):
         
-            if debug:  
-                n = mask.size
-                print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
-                
+        # nans = np.isnan(self.wlt)
+        master = np.median(self.flux, axis=0)
+        
+        mask = master < sat
+        self.wlt[mask] = np.nan
+        self.flux[:,mask] = np.nan
+        if not self.flux_err is None:
+            self.flux_err[:,mask] = np.nan
+        
+        if debug: print('Masked fraction = {:.2f} %'.format(self.nan_frac*100))
+        
         if ax != None: self.imshow(ax=ax)
         return self
         
@@ -362,25 +441,25 @@ class Datacube:
         self.master = gaussian_smooth(np.nanmedian(self.flux, axis=1), xstd=300.) # average over frames
         return self
     
-    @property
-    def SNR(self):
-        if self.flux_err is None:
-            med = np.nanmedian(self.flux)
-            return med / np.nanstd(self.flux)
-        else:
-            print('Using flux_err')
-            # return np.nanmean(np.nanmean(self.flux, axis=1)/ np.nanmean(self.flux_err, axis=1))
-            # return np.nanmean(self.flux / self.flux_err)
-            # return np.nanmedian(self.flux) / np.nanstd(self.flux)
-            std = np.nanstd(self.flux, axis=0)
-            return 1/np.nanmean(np.nanstd(self.flux, axis=0))
+    # @property
+    # def SNR(self):
+    #     if self.flux_err is None:
+    #         med = np.nanmedian(self.flux)
+    #         return med / np.nanstd(self.flux)
+    #     else:
+    #         print('Using flux_err')
+    #         # return np.nanmean(np.nanmean(self.flux, axis=1)/ np.nanmean(self.flux_err, axis=1))
+    #         # return np.nanmean(self.flux / self.flux_err)
+    #         # return np.nanmedian(self.flux) / np.nanstd(self.flux)
+    #         std = np.nanstd(self.flux, axis=0)
+    #         return 1/np.nanmean(np.nanstd(self.flux, axis=0))
     
-    @property
-    def Q(self):
-        # return 1/np.nanmean(np.nanstd(self.flux - np.nanmedian(self.flux), axis=0))
-        # return np.nanmean(np.nanmean(self.flux, axis=1)/np.nanstd(self.flux, axis=1))
-        # return np.sqrt(np.nanmean(np.var(self.flux, axis=0)))
-        return 1/np.nanstd(self.flux)
+    # @property
+    # def Q(self):
+    #     # return 1/np.nanmean(np.nanstd(self.flux - np.nanmedian(self.flux), axis=0))
+    #     # return np.nanmean(np.nanmean(self.flux, axis=1)/np.nanstd(self.flux, axis=1))
+    #     # return np.sqrt(np.nanmean(np.var(self.flux, axis=0)))
+    #     return 1/np.nanstd(self.flux)
 
     
     
@@ -391,7 +470,7 @@ class Datacube:
 
         nans = np.isnan(self.wlt)
         if dRV > 0.:
-            pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
+            pixscale = const.c.to('km/s').value * np.nanmean(np.diff(self.wlt)) / np.nanmedian(self.wlt)
             window = 2 * dRV * pixscale
         
         lowpass = ndimage.gaussian_filter(self.flux[:,~nans], [0, window])
@@ -542,38 +621,7 @@ class Datacube:
         dco = self.copy()
         self = Align(dco).apply_shifts(ax=ax).dco
         return self
-#    
-#    def align_frames(self, rdrift):
-#        '''given a DCO and the pixel positions of telluric lines
-#        compute the relative drift with the master spectrum'''
-#        
-##        rdrift = np.zeros(self.nObs)
-##        master = Template(wlt=np.arange(0,self.nPix), flux=np.nanmedian(self.flux, axis=0))
-#        
-##        cent_master = fit_gaussian_lines(master.wlt, master.flux, centroids)
-#        
-#        for f in range(self.nObs):
-##            flux = self.flux[f]
-##            cent_data = fit_gaussian_lines(master.wlt, flux, centroids)
-##            rdrift[f] = np.nanmedian(cent_data - cent_master)
-#            
-#            # 1 pixel = 2.7 km/s for GIANO (see Brogi+2018)
-#            beta = 1+2.7*rdrift[f]*u.km/u.s /const.c
-#            cs = splrep(self.wlt[f,:], self.flux[f,:])
-#            self.wlt[f,:] = self.wlt[f,:] * beta
-#            self.flux[f,:] = splev(self.wlt[f,:], cs)
-#            
-#        return self
-#    
-#    def apply_wave_solution(self, wsol):
-#        '''for each order, pass a CALIBRATED wavelength solution and
-#        spline interpolate each spectrum (each frame) onto the new grid'''
-#        for f in range(self.nObs):
-#            cs = splrep(self.wlt[f,:], self.flux[f,:])
-#            self.flux[f,:] = splev(wsol, cs)
-#            
-#        self.wlt = wsol
-#        return self
+
     
     def to_stellar_frame(self, BERV):
         '''given a single-order datacube and a BERV vector in km/s
@@ -586,32 +634,22 @@ class Datacube:
         for f in range(self.nObs):
             cs = splrep(self.wlt[~nans], self.flux[f,~nans])
             self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
+
         return self
-    
-#    def sysrem(self, n, mode='subtract', debug=False):
-#        from .sysrem import SysRemRoutine
-##        dco = self.copy()
-#        self.flux = SysRemRoutine(self, n, mode, debug)
-#        return self 
+
         
-    def sysrem(self, n=6, mode='subtract', weigh_cols=False, debug=False, ax=None):
+    def sysrem(self, n=6, mode='subtract', debug=False, ax=None, outdir=None):
         '''new sysrem implementation (august 25th 2022)'''
         from .sysrem import SysRem
 #        dco = self.copy()
-        sys = SysRem(self).run(n, mode, debug)
+        sys = SysRem(self).run(n, mode, debug, outdir)
         nans =  np.isnan(self.wlt)
-        self.flux[:, ~nans] = sys.r_ij
         
-        # Weight columns??? TESTING
-        if weigh_cols:
-            mean_std = np.nanstd(self.flux[:,~nans])
-            col_std = np.nanstd(self.flux[:,~nans], axis=0)
-            
-            self.flux[:,~nans] /=  col_std# NEW 24 April 2022
-            self.flux_err[:,~nans] /= col_std
-           # multiply to conserve total signal
-            self.flux[:,~nans] *= mean_std
-            self.flux_err[:,~nans] *= mean_std
+        if mode == 'gibson':
+            self.flux[:, ~nans] = self.flux[:,~nans] / sys.sysrem_model
+        else:
+            self.flux[:, ~nans] = sys.r_ij
+       
         if ax != None: self.imshow(ax=ax)
         return self 
     
@@ -656,26 +694,6 @@ class Datacube:
             
         if debug:
             print('Input {:}\nOutput {:}'.format(shape_in, self.shape))
-        return self
-    
-    def reduce_order(self, steps, ax=None):
-        '''given a SINGLE-ORDER datacube and a dictionary containing the 
-        functions as keys and subdictionaries as arguments
-        sequentially apply all reduction steps
-        plot every step by passing a ax= plt.gca()'''
-        if not ax is None: self.imshow(ax=ax[0])
-        
-        for i, (fun,args) in enumerate(steps.items()):
-            if not ax is None: self.imshow(ax=ax[i])
-            
-            print(fun)
-            if args != None:
-                self = getattr(self, fun)(**args)
-            else:
-                self = getattr(self, fun)()
-                
-            if not ax is None: self.imshow(ax=ax[i+1])
-            
         return self
     
     

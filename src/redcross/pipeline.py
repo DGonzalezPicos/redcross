@@ -8,16 +8,18 @@ import numpy as np
 class Pipeline:
     '''class to manage the reduction steps and apply them to a single-order datacube
     steps:: list of functions from `datacube` '''
-    def __init__(self, steps=[]):
-        self.steps = steps
-        self.args = ([None for _ in range(len(steps))])
+    def __init__(self, steps=None):
+        self.steps = steps or []
+        self.args = ([None for _ in range(len(self.steps))]) or []
         
     def add(self, step, args=None):
         self.steps.append(step)
         self.args.append(args)
         
-    def reduce(self, dco, ax=None):
+    def reduce(self, order, dc=None, ax=None):
 #        print('Reducing order...')
+        dc = dc or self.dc
+        dco = dc.order(order)
         if not ax is None: dco.imshow(ax=ax[0])
         
         for i, fun in enumerate(self.steps):
@@ -44,9 +46,39 @@ class Pipeline:
             
         return dco
     
+    def reduce_orders(self, dc, num_cpus=4):
+        import multiprocessing as mp
+        import tqdm
+#        from p_tqdm import p_map
+#        from pathos.pools import ProcessPool
+#        from joblib import Parallel, delayed
+        orders = np.arange(0, dc.nOrders)
+        self.dc = dc.copy() # make copy
+#        output = p_map(self.reduce, orders, num_cpus=num_cpus)
+#        pool = ProcessPool(nodes=4)
+#        output = pool.map(self.reduce, orders, num_cpus=num_cpus)
+        
+        pool = mp.Pool(processes=4)
+        output = []
+        for result in tqdm.tqdm(pool.imap_unordered(self.reduce, orders), total=len(orders)):
+            output.append(result)
+        
+        
+#        output = Parallel(n_jobs=4, verbose=1)(delayed(self.reduce)(orders))        
+        self.dc.wlt = np.hstack([output[k].wlt for k in range(orders.size)])
+        self.dc.flux = np.hstack([output[k].flux for k in range(orders.size)])
+        self.dc.flux_err = np.hstack([output[k].flux_err for k in range(orders.size)])
+        
+        self.dc.sort_wave()
+        return self.dc
+    
     def set_sysrem(self, n):
         '''change the number of sysrem iterations after defining it'''
         sys_ind = int(np.argwhere(np.array(self.steps)=='sysrem'))
         self.args[sys_ind]['n'] = n
         return self
+    @property
+    def nSysRem(self):
+        sys_ind = int(np.argwhere(np.array(self.steps)=='sysrem'))
+        return int(self.args[sys_ind]['n'])
 
