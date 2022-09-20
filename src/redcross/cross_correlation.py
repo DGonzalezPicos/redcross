@@ -29,15 +29,17 @@ class CCF(Datacube):
         start=time.time()
         nans = np.isnan(dc.wlt)
         self.flux = np.zeros((dc.nObs,len(self.rv)))    
-        gTemp = self.template_interp1d(dc.wlt[~nans])
+        # gTemp = self.template_interp1d(dc.wlt[~nans])
+        gTemp = self.template.shift_2D(self.rv, dc.wlt).gflux[:,~nans] # TESTING
         gTemp -= np.nanmean(gTemp) 
-        
+        dc.estimate_noise() # testing Sept 19th 2022
         
         if weighted:
             data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
             # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
-            noise2 = np.power(dc.flux_err[:,~nans], 2)
-            self.flux = np.dot(data/noise2, gTemp.T) # TESTING
+            noise2 = np.var(dc.flux[:,~nans], axis=0)
+            # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
+            self.flux = np.dot(data/noise2, gTemp.T) 
 
 
         else:
@@ -449,17 +451,13 @@ class Template(Datacube):
 #            print('Wavelength in Unknown units!!')
 #        return self
     
-    def get_2DTemplate(self, RV, dco):
+    def shift_2D(self, RV):
         c = const.c.to('km/s').value
         beta = 1 + (RV/c)
-#        wl_shift = np.outer(beta, dco.wlt) # (nObs, nPix) matrix
-        self.gflux = np.zeros_like(dco.flux)
-        self.gwave = np.zeros_like(dco.wlt)
+        self.gflux = np.zeros((RV.size, self.wlt.size))
         cs = splrep(self.wlt, self.flux)
-        for exp in range(dco.nObs):
-#            self.gwave = wl_shift[exp]
-            self.gflux[exp,:] = splev(dco.wlt*beta[exp], cs)
-            # transit_depth[exp,:] = interp1d(self.wlt, self.flux, bounds_error=True)(wl_shift[exp])
+        for j in range(RV.size):
+            self.gflux[j,] = splev(self.wlt*beta[j], cs)
         return self
     
     def load_TP(self):
@@ -496,11 +494,12 @@ class Template(Datacube):
       return self  
 
 
-    def high_pass_gaussian(self, window=None, dRV=0.):
+    def high_pass_gaussian(self, window=None, dRV=0., debug=False):
         from scipy import ndimage
         if dRV > 0.:
             pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
             window = dRV * pixscale
+            if debug: print('window = {:.2f} pixels'.format(window))
         lowpass = ndimage.gaussian_filter1d(self.flux, window)
         self.flux /= lowpass
         return self
@@ -533,18 +532,44 @@ class Template(Datacube):
         self.flux /= y_continuum_fitted.value
         return self
     
-    def convolve_instrument(self, res=50e3):
-        '''convolve to instrumental resolution with a Gaussian kernel'''
-        from astropy.convolution import Gaussian1DKernel, convolve
+    # def convolve_instrument(self, res=50e3):
+    #     '''convolve to instrumental resolution with a Gaussian kernel'''
+    #     from astropy.convolution import Gaussian1DKernel, convolve
         
-        cenwave = np.median(self.wlt)
-        # Create kernel
-        g = Gaussian1DKernel(stddev=0.5*cenwave/res) # set sigma = FWHM / 2. = lambda / R
-        self.flux = convolve(self.flux, g)
+    #     cenwave = np.median(self.wlt)
+    #     # Create kernel
+    #     g = Gaussian1DKernel(stddev=0.5*cenwave/res) # set sigma = FWHM / 2. = lambda / R
+    #     self.flux = convolve(self.flux, g)
+    #     return self
+    
+    def resample(self, wave, mode='2D'):
+        
+        if mode == '1D':
+            cs = splrep(self.wlt, self.flux)
+            self.flux_res = splev(wave, cs)
+            
+        elif mode == '2D':
+            self.gflux_res = np.zeros((self.gflux.shape[0], wave.size))
+            for i in range(self.gflux.shape[0]):
+                cs = splrep(self.wlt, self.gflux[i,:])
+                self.gflux_res[i,:] = splev(wave, cs)
         return self
     
-
-    
+    def pyAstro_convolve(self, row):
+        from PyAstronomy import pyasl
+        newflux = pyasl.instrBroadGaussFast(self.wlt, self.gflux[row,:],
+                                            self.res, edgeHandling="firstlast", fullout=False, equid=True,maxsig=5.0)
+        
+        return newflux
+    def convolve_instrument(self, res=50e3, num_cpus=5):
+        import multiprocessing as mp
+        self.res = res
+        rows = np.arange(0, self.gflux.shape[0])
+        with mp.Pool(num_cpus) as p:
+            output = p.map(self.pyAstro_convolve, rows)
+            
+        self.gflux = np.array(output)
+        return output
     
     
     

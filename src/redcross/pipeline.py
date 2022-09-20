@@ -62,14 +62,17 @@ class Pipeline:
         output = []
         for result in tqdm.tqdm(pool.imap_unordered(self.reduce, orders), total=len(orders)):
             output.append(result)
+        # return output
         
-        
-#        output = Parallel(n_jobs=4, verbose=1)(delayed(self.reduce)(orders))        
-        self.dc.wlt = np.hstack([output[k].wlt for k in range(orders.size)])
-        self.dc.flux = np.hstack([output[k].flux for k in range(orders.size)])
-        self.dc.flux_err = np.hstack([output[k].flux_err for k in range(orders.size)])
-        
-        self.dc.sort_wave()
+#         print(output[0].shape)
+# #        output = Parallel(n_jobs=4, verbose=1)(delayed(self.reduce)(orders))        
+#         # self.dc.wlt = np.hstack([output[k].wlt for k in range(orders.size)])
+#         # self.dc.flux = np.hstack([output[k].flux for k in range(orders.size)])
+#         # self.dc.flux_err = np.hstack([output[k].flux_err for k in range(orders.size)])
+        [self.dc.update(output[k], k) for k in range(len(output))]
+#         print(self.dc.wlt.shape)
+#         self.dc.wlt = np.median(self.dc.wlt, axis=1)
+#         self.dc.sort_wave()
         return self.dc
     
     def set_sysrem(self, n):

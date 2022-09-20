@@ -77,9 +77,13 @@ class Datacube:
             vmin = np.nanmin(self.flux)
             vmax = np.nanmax(self.flux)
             
-
-
-        ext = [np.nanmin(self.wlt), np.nanmax(self.wlt),0, self.nObs-1]
+        # plot y-axis as phase (if available)
+        if hasattr(self, 'phase'):
+            y1, y2 = np.min(self.phase), np.max(self.phase)
+        else:
+            y1, y2 = 0, self.nObs-1
+            
+        ext = [np.nanmin(self.wlt), np.nanmax(self.wlt), y1, y2]
         ax = ax or plt.gca()
         obj = ax.imshow(self.flux,origin='lower',aspect='auto',
                         extent=ext,vmin=vmin,vmax=vmax, **kwargs)
@@ -97,8 +101,10 @@ class Datacube:
         in time and pixel dimensions'''
         xStDev = np.nanstd(self.flux, axis=0)
         yStDev = np.nanstd(self.flux, axis=1)
+        # my estimate method
         self.flux_err = (0.5*(yStDev[:,np.newaxis] + xStDev[np.newaxis,:]))
-        # print('FLUX_ERR shape = ', self.flux_err.shape)
+        # as in Nugroho+2021
+        self.flux_err = np.outer(yStDev, xStDev)/ np.nanstd(self.flux)
         return self
         
     

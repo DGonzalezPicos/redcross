@@ -6,19 +6,19 @@ from astropy import units as u, coordinates as coord
 from scipy.interpolate import interp1d
 class Planet:
     
-    def __init__(self, name=None, file=None, **header):
-        if name == 'WASP189':
-            self.P = 2.7240338 # d
-            self.a = 0.0497 # AU
-            self.i = 84.32 # deg
-            self.Tc_jd = 2456706.4558
-            self.T_14 = 0.1813 * 24. # d
-            self.v_sys = -20.82 #km/s
-            self.RA_DEG = 225.68695
-            self.DEC_DEG = -3.0313833
+    def __init__(self, file=None, name=None, **header):
+        # if name == 'WASP189':
+        #     self.P = 2.7240338 # d
+        #     self.a = 0.0497 # AU
+        #     self.i = 84.32 # deg
+        #     self.Tc_jd = 2456706.4558
+        #     self.T_14 = 0.1813 * 24. # d
+        #     self.v_sys = -20.82 #km/s
+        #     self.RA_DEG = 225.68695
+        #     self.DEC_DEG = -3.0313833
 
-        elif file != None:
-            pvalues = np.loadtxt(name)
+        if not file is None:
+            pvalues = np.loadtxt(file)
             keys = ['P','a', 'i', 'v_sys', 'Tc_jd', 'T_14']
             for key, value in zip(keys, pvalues):
                 setattr(self, key, value)

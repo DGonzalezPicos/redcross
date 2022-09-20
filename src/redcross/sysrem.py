@@ -30,7 +30,7 @@ class SysRem:
             
         # parameters for convergence
         self.max_iter = 1000  # maximum iterations for each sysrem component
-        self.atol = 1e-2 # absolute tolerance
+        self.atol = 1e-5 # absolute tolerance
         self.rtol = 0.0 # relative tolerance
         
 
@@ -78,8 +78,7 @@ class SysRem:
             m = np.outer(a,c) # correction matrix
             
             dm = (m-m0)/self.sigma_ij # fractional change
-            
-            if np.allclose(dm, 0, rtol=self.rtol, atol=self.atol):
+            if np.allclose(np.nanmean(dm), 0, rtol=self.rtol, atol=self.atol):
                 converge = True
                 break
             
