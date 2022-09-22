@@ -31,7 +31,9 @@ class Planet:
 
         if hasattr(self, 'a'):
             self.v_orb = (2*np.pi*self.a*u.AU / (self.P*u.d)).to(u.km/u.s)
-            self.Kp = self.v_orb * np.sin(np.radians(self.i))
+            self.Kp = (self.v_orb * np.sin(np.radians(self.i))).value
+            
+        self.frame = 'telluric' # default
 
     @property
     def BJD(self, location='orm'):
@@ -62,9 +64,17 @@ class Planet:
     @property
     def RV(self):
         #Derive the instantaneous radial velocity at which the planet is expected to be.
-        rvel = (self.v_sys*u.km/u.s)-self.BERV*u.km/u.s
-
-        return rvel + (np.sin(2*np.pi*self.phase)*self.v_orb*np.sin(np.radians(self.i)))
+        RV_planet = ((np.sin(2*np.pi*self.phase)*self.v_orb*np.sin(np.radians(self.i)))).value
+        if self.frame == 'stellar':
+            rvel = 0.0
+        elif self.frame == 'telluric':
+            rvel = ((self.v_sys*u.km/u.s)-self.BERV*u.km/u.s).value
+            
+        elif self.frame == 'planet':
+            return np.zeros_like(self.BERV)
+            
+            
+        return (rvel + RV_planet)
     
     def interpolate(self, newX):
         # Update planet header with the interpolated vectors covering the gap
@@ -84,9 +94,9 @@ class Planet:
       
         shape_in = self.RV.size
         phase = self.phase
-        phase_14 = ((self.T_14) % self.P) / self.P
+        phase_14 = 0.5 * ((self.T_14) % self.P) / self.P
         
-        mask = np.abs(phase - 0.50) < (phase_14/2.) # frames IN-eclipse
+        mask = np.abs(phase - 0.50) < phase_14 # frames IN-eclipse
 #        mask = (phase > (0.50 - (0.5*phase_14)))*(phase < (0.50 + (0.5*phase_14)))
         if invert_mask:
             mask = ~mask

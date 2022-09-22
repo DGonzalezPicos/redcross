@@ -3,6 +3,7 @@ from .cross_correlation import CCF, KpV, Template
 from .planet import Planet
 from .read import read_harpsn, read_giano
 from .pipeline import Pipeline
+from .sysrem import SysRem
 __author__ = 'Darío González Picos'
 __license__ = 'GPLv3'
 __version__ = '0.1'

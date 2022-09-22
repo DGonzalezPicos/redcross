@@ -15,6 +15,8 @@ class SysRem:
         self.sysrem_model = np.zeros_like(self.r_ij) # for Gibson method
         self.o = dco.o
         
+        
+        
         if dco.flux_err is None: # IMPORTANT STEP
             dco.estimate_noise()
             

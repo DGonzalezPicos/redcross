@@ -2,7 +2,7 @@ __all__ = ['Datacube']
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.interpolate import splrep, splev
+from scipy.interpolate import interp1d, splrep, splev
 from copy import deepcopy
 import astropy.units as u
 import astropy.constants as const
@@ -22,6 +22,7 @@ class Datacube:
         self.night = night
         for key in header:
             setattr(self, key, header[key])
+        self.frame = 'telluric' # by default
             
     @property
     def nObs(self):
@@ -40,6 +41,9 @@ class Datacube:
     @property
     def shape(self):
         return self.flux.shape
+    @property
+    def nans(self):
+        return np.isnan(self.wlt)
     
     @property
     def nan_frac(self):
@@ -118,6 +122,7 @@ class Datacube:
         d = np.load(path, allow_pickle=True).tolist()
         for key in d.keys():
             setattr(self, key, d[key])
+        self.get_header()
         return self
     
     
@@ -131,21 +136,27 @@ class Datacube:
     def inject_signal(self, planet, template, factor=1., ax=None):
         temp = deepcopy(template) # important
         
-        beta = 1 - (planet.RV/const.c.to('km/s')).value
-        wl_shift = np.outer(beta, self.wlt) # (nObs, nPix) matrix
+        beta = 1 - (planet.RV/const.c.to('km/s').value)
+        # print(beta)
+        # wl_shift = np.outer(beta, self.wlt) # (nObs, nPix) matrix
+        
         temp.flux = (temp.flux - 1.)*factor # DARIO MARCH 30TH 2022
         temp.flux += 1.
 
         ##
         mask = self.mask_eclipse(planet, return_mask=True)
+        # print(mask)
         # mask is True for in-eclipse points
         
         ##
         cs = splrep(temp.wlt, temp.flux) # coefficient spline
         for k in np.argwhere(mask==False):
             exp = int(k)
-            
-            inject_flux = splev(wl_shift[exp], cs)
+            if np.isnan(cs[1]).any():
+                inject_flux = interp1d(temp.wlt*beta[exp], temp.flux)(self.wlt)
+            else:
+                inject_flux = splev(self.wlt*beta[exp], cs)
+                
             self.flux[exp] *= inject_flux
             
         if ax != None: self.imshow(ax=ax)
@@ -188,7 +199,7 @@ class Datacube:
         return deepcopy(self)
     
     
-    def sigma_clip(self, sigma=5., axis=0, debug=False):
+    def sigma_clip(self, sigma=5., axis=0, debug=False, ax=None):
         '''For each pixel channel, replace outliers from each frame by the median column value
         outliers are points beyond nSigma from the column mean'''
 
@@ -220,6 +231,8 @@ class Datacube:
             
         if debug:
             print('outliers = {:.2e} %'.format(outliers/self.flux.size))
+            
+        if ax != None: self.imshow(ax=ax)   
         return self
     
     def remove_continuum(self, mode='polyfit', deg=3., ax=None):

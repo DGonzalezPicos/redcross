@@ -24,14 +24,18 @@ class CCF(Datacube):
         return self.rv
 
    
-    def run(self, dc, debug=False, weighted=False, ax=None):
-        
+    def run(self, dc, debug=False, weighted=True, hp_window=15., ax=None):
+        self.frame = dc.frame
         start=time.time()
         nans = np.isnan(dc.wlt)
         self.flux = np.zeros((dc.nObs,len(self.rv)))    
-        # gTemp = self.template_interp1d(dc.wlt[~nans])
-        gTemp = self.template.shift_2D(self.rv, dc.wlt).gflux[:,~nans] # TESTING
-        gTemp -= np.nanmean(gTemp) 
+        
+        if not hasattr(self, 'gTemp'):
+            print('Computing 2D template...')
+            temp2D = self.template.shift_2D(self.rv, dc.wlt).high_pass_gaussian(window=15.)
+            self.gTemp = temp2D.gflux[:,~nans] # TESTING
+            self.gTemp -= np.nanmean(self.gTemp) 
+            
         dc.estimate_noise() # testing Sept 19th 2022
         
         if weighted:
@@ -39,12 +43,12 @@ class CCF(Datacube):
             # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
             noise2 = np.var(dc.flux[:,~nans], axis=0)
             # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
-            self.flux = np.dot(data/noise2, gTemp.T) 
+            self.flux = np.dot(data/noise2, self.gTemp.T) 
 
 
         else:
             divide = np.sum(self.template.flux)
-            self.flux = np.dot(dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans]), gTemp.T) / divide
+            self.flux = np.dot(dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans]), self.gTemp.T) / divide
                     
         if debug:
             print('Max CCF value = {:.2f}'.format(self.flux.max()))
@@ -136,20 +140,42 @@ class CCF(Datacube):
         
         
     
-    def run_slow(self, dc):
+    def compute(self, dc):
+        '''
+        Basic CCF. Given a 1D template (on the CCF definition)
+        and a 2D datacube, shift and resampled the
+        template on the data wavelength grid for all RV-shifts.
+
+        Parameters
+        ----------
+        dc : datacube
+            reduced datacube.
+
+        Returns
+        -------
+        TYPE
+            CCF object with new attribute `flux` containing the CCF values.
+
+        '''
+        self.frame = dc.frame # store info 
         print('Compute CCF...')
         start=time.time()
-        self.template.flux -= np.mean(self.template.flux)
-        dc.flux -= np.mean(dc.flux)
+        nans = np.isnan(dc.wlt) # manage masked pixel columns
+        # Subtract mean of TEMPLATE (m=model) and DATA (R=residuals)
+        wave_m = self.template.wlt
+        wave_R = dc.wlt[~nans]
+        m = self.template.flux - np.mean(self.template.flux)
+        R = dc.flux[:,~nans] - np.nanmean(dc.flux[:,~nans])
+        # Prepare CCF matrix
         self.flux = np.zeros((dc.nObs,len(self.rv)))
-        
+        # Get adimensional RV-shift vector
         beta = 1+self.rv*u.km/u.s /const.c
+        # Loop over each RV-shift
         for i in range(len(self.rv)):
-
-            fxt_i = interp1d(self.template.wlt*beta[i],self.template.flux)(dc.wlt)
-            self.flux[:,i] = np.dot(dc.flux,fxt_i)/np.sum(fxt_i)
+            g = interp1d(wave_m*beta[i], m)(wave_R) # shift and resample in one step
+            self.flux[:,i] = np.dot(R, g)/np.sum(g)
             
-        self.flux /= np.mean(self.flux,axis=0)
+        # self.flux /= np.mean(self.flux,axis=0)
         print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
         return self
     
@@ -185,12 +211,33 @@ class CCF(Datacube):
         ccf = self.copy()
         for i in range(self.nObs):
             cs = splrep(ccf.rv, ccf.flux[i,])
-            ccf.flux[i,] = splev(ccf.rv+planet.RV.value[i], cs)
+            ccf.flux[i,] = splev(ccf.rv+planet.RV[i], cs)
         mask = (np.abs(ccf.rv)<np.percentile(np.abs(ccf.rv), 50))
         ccf.rv = ccf.rv[mask]
         ccf.flux = ccf.flux[:,mask]
         if ax != None: ccf.imshow(ax=ax)
+        ccf.frame = 'planet'
         return ccf
+    
+    def eclipse_label(self, planet, ax, x_rv=None, c='w'):
+        x_rv = x_rv or np.percentile(self.rv, 20) # x-position of text
+        self.planet = planet.copy()
+        # print(self.planet.frame)
+
+        
+        phase_14 = 0.5 * ((planet.T_14) % planet.P) / planet.P
+        y = [0.50 - (i*phase_14) for i in (-1,1)]
+        [ax.axhline(y=y[i], ls='--', c=c) for i in range(2)]
+        ax.text(s='eclipse', x=x_rv+5, y=0.50, c=c, fontsize=12)#, transform=ax.transAxes)
+        ax.annotate('', xy=(x_rv, y[1]), xytext=(x_rv, y[0]), c=c, arrowprops=dict(arrowstyle='<->', ec=c))
+        
+        # planet trail
+        mask = np.abs(self.planet.phase - 0.50) < (phase_14)
+        self.planet.frame = self.frame # get the correct RV
+        ax.plot(self.planet.RV[mask], self.planet.phase[mask], '--r')
+        ax.plot(self.planet.RV[-10:], self.planet.phase[-10:], '--r')
+        return ax
+        
 
     
 
@@ -207,7 +254,7 @@ class KpV:
     #        self.vrestVec = np.arange(-vrest[0], vrest[0]+vrest[1], vrest[1])
             self.dRV = deltaRV or ccf.dRV
     
-            self.kpVec = self.planet.Kp.value + np.arange(-kp_radius, kp_radius, self.dRV)
+            self.kpVec = self.planet.Kp + np.arange(-kp_radius, kp_radius, self.dRV)
             self.vrestVec = np.arange(-vrest_max, vrest_max, self.dRV)
             self.bkg = bkg
         
@@ -417,6 +464,28 @@ class KpV:
         for key in d.keys():
             setattr(self, key, d[key])
         return self 
+    
+    def plot_1D(self, peak, ax, v_range=None):
+        # ind_vsys0 = np.abs(self.vrestVec - peak[0]).argmin()
+        ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
+        # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
+        ax.plot(self.vrestVec, self.snr[ind_kp0,:], label='Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0]))
+        ax.set(xlabel='$\Delta V_{{sys}}$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
+        if not v_range is None: ax.set_ylim(v_range)
+        ax.legend(frameon=False, loc='upper right')
+        return ax
+    
+    def merge_kpvs(self, kpv_list):
+        new_kpv = kpv_list[0].copy()
+        # add signal
+        new_kpv.snr = np.sum([kpv_list[i].snr for i in range(len(kpv_list))], axis=0)
+        
+        # convert into actual SNR 
+        noise_map = np.std(new_kpv.snr[:,np.abs(new_kpv.vrestVec)>new_kpv.bkg])
+        bkg_map = np.median(new_kpv.snr[:,np.abs(new_kpv.vrestVec)>new_kpv.bkg]) # subtract the background level
+        new_kpv.snr -= bkg_map   
+        new_kpv.snr /= noise_map
+        return new_kpv
 
 
     
@@ -429,36 +498,58 @@ class Template(Datacube):
         else:
             self.wlt = wlt
             self.flux = flux
+    @property
+    def resolution(self):
+        return np.round(np.median(self.wlt) / np.mean(np.diff(self.wlt)), 0)
+                   
             
-    def plot(self, ax=None, **kwargs):
+    def plot(self, ax=None, mode='1D', **kwargs):
         ax = ax or plt.gca()
-        ax.plot(self.wlt, self.flux, **kwargs)
+        if mode == '1D':
+            if not self.wlt.shape==self.flux.shape:
+                ax.plot(self.wlt, self.gflux[0], **kwargs)
+            else:
+                ax.plot(self.wlt, self.flux, **kwargs)
+        elif mode == '2D':
+            ext = [self.wlt.min(), self.wlt.max(), self.rv.min(), self.rv.max()]
+            ax.imshow(self.gflux, origin='lower', aspect='auto', extent=ext, **kwargs)
+            ax.set(ylabel='RV (km/s)')
         return ax
-        
-#    def check_data(self):
-#        cenwave = np.median(self.wlt)
-#        unit = 'Unknown'
-#        if (cenwave < 1000) & (cenwave>100):
-#            unit = 'nm'
-#            print('--> Transforming from nm to A...')
-#            self.wlt *= 10.
-#            print('New central wavelength = {:.2f} A'.format(np.median(self.wlt)))
-#            
-#        elif cenwave > 1000:
-#            print('Wavelength in A')
-#            unit = 'A'
-#        else:
-#            print('Wavelength in Unknown units!!')
-#        return self
     
-    def shift_2D(self, RV):
-        c = const.c.to('km/s').value
-        beta = 1 + (RV/c)
-        self.gflux = np.zeros((RV.size, self.wlt.size))
-        cs = splrep(self.wlt, self.flux)
-        for j in range(RV.size):
-            self.gflux[j,] = splev(self.wlt*beta[j], cs)
+    
+    def sort(self):
+        '''
+        Sort `wlt` and `flux` vectors by wavelength.
+
+        Returns
+        sorted Template
+        -------
+        '''
+        sort = np.argsort(self.wlt)
+        self.wlt = self.wlt[sort]
+        self.flux = self.flux[sort]
         return self
+
+    
+    def shift_2D(self, RV, wave=None):
+        temp = self.copy()
+        c = const.c.to('km/s').value
+        self.rv = RV
+        beta = 1 - (self.rv/c)
+        
+        
+        if not wave is None: 
+            temp.wlt = wave
+        
+        temp.gflux = np.zeros((self.rv.size, temp.wlt.size))
+        # cs = splrep(wave_in*beta[j], self.flux)
+        for j in range(self.rv.size):
+            cs = splrep(self.wlt*beta[j], temp.flux)
+            if np.isnan(cs[1]).any():
+                temp.gflux[j,] = interp1d(self.wlt*beta[j], temp.flux)(temp.wlt)
+            else:
+                temp.gflux[j,] = splev(temp.wlt, cs)
+        return temp
     
     def load_TP(self):
         path = 'data/PT-two_point_profile.npy'
@@ -498,14 +589,17 @@ class Template(Datacube):
         from scipy import ndimage
         if dRV > 0.:
             pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
-            window = dRV * pixscale
+            window = 2 * dRV * pixscale
             if debug: print('window = {:.2f} pixels'.format(window))
+            
         lowpass = ndimage.gaussian_filter1d(self.flux, window)
+        if hasattr(self, 'gflux'):
+            nans = self.nans
+            for row in range(self.gflux.shape[0]):
+                self.gflux[row,~nans] /= ndimage.gaussian_filter1d(self.gflux[row,~nans], window)
         self.flux /= lowpass
         return self
     
-    def copy(self):
-        return deepcopy(self)
     
     
     def remove_continuum(self, exclude=None, wave_units=u.AA, ax=None):
@@ -555,21 +649,28 @@ class Template(Datacube):
                 self.gflux_res[i,:] = splev(wave, cs)
         return self
     
-    def pyAstro_convolve(self, row):
+    def pyAstro_convolve(self, row=-1):
         from PyAstronomy import pyasl
-        newflux = pyasl.instrBroadGaussFast(self.wlt, self.gflux[row,:],
+        if row < 0:
+            flux = self.flux
+        else:
+            flux = self.gflux[row, ~self.nans]
+        newflux = pyasl.instrBroadGaussFast(self.wlt[~self.nans], flux,
                                             self.res, edgeHandling="firstlast", fullout=False, equid=True,maxsig=5.0)
         
         return newflux
     def convolve_instrument(self, res=50e3, num_cpus=5):
         import multiprocessing as mp
         self.res = res
-        rows = np.arange(0, self.gflux.shape[0])
-        with mp.Pool(num_cpus) as p:
-            output = p.map(self.pyAstro_convolve, rows)
-            
-        self.gflux = np.array(output)
-        return output
+        if hasattr(self, 'gflux'):
+            rows = np.arange(0, self.gflux.shape[0])
+            with mp.Pool(num_cpus) as p:
+                output = p.map(self.pyAstro_convolve, rows)
+                
+            self.gflux[:,~self.nans] = np.array(output)
+        else:
+            self.flux = self.pyAstro_convolve()
+        return self
     
     
     
