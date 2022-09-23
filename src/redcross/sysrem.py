@@ -109,3 +109,13 @@ class SysRem:
             
         return self
 
+
+
+    def get_vectors(self, n, debug=False):
+        a = np.zeros((n, self.dco.nObs))
+        c = np.zeros((n, self.dco.nPix))
+        for i in range(n):
+            self.iterate_ac(debug=debug)
+            a[i,] = self.a_j
+            c[i,] = self.c_i
+        return a, c

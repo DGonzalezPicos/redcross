@@ -6,6 +6,8 @@ from copy import deepcopy
 import astropy.units as u
 import astropy.constants as const
 from .datacube import Datacube
+import multiprocessing as mp
+
 
 class CCF(Datacube):
     mode = 'ccf'
@@ -31,11 +33,13 @@ class CCF(Datacube):
         self.flux = np.zeros((dc.nObs,len(self.rv)))    
         
         if not hasattr(self, 'gTemp'):
+            start = time.time()
             print('Computing 2D template...')
             temp2D = self.template.shift_2D(self.rv, dc.wlt).high_pass_gaussian(window=15.)
             self.gTemp = temp2D.gflux[:,~nans] # TESTING
             self.gTemp -= np.nanmean(self.gTemp) 
-            
+            print('Time to build 2D template = {:.2f} s'.format(time.time()-start))
+
         dc.estimate_noise() # testing Sept 19th 2022
         
         if weighted:
@@ -207,11 +211,23 @@ class CCF(Datacube):
                         
         return self
     
-    def to_planet_frame(self, planet, ax=None):
+    def interpolate_to_planet(self, i):
+        '''help function to parallelise `to_planet_frame` '''
+        cs = splrep(self.rv, self.flux[i,])
+        flux_i = splev(self.rv+self.planet.RV[i], cs)
+        return flux_i
+    
+    def to_planet_frame(self, planet, ax=None, num_cpus=6):
         ccf = self.copy()
-        for i in range(self.nObs):
-            cs = splrep(ccf.rv, ccf.flux[i,])
-            ccf.flux[i,] = splev(ccf.rv+planet.RV[i], cs)
+        # for i in range(self.nObs):
+        #     cs = splrep(ccf.rv, ccf.flux[i,])
+        #     ccf.flux[i,] = splev(ccf.rv+planet.RV[i], cs)
+        ccf.planet = planet
+        with mp.Pool(num_cpus) as p:
+            flux_i = p.map(ccf.interpolate_to_planet, np.arange(self.nObs))
+        
+        ccf.flux = np.array(flux_i)
+        
         mask = (np.abs(ccf.rv)<np.percentile(np.abs(ccf.rv), 50))
         ccf.rv = ccf.rv[mask]
         ccf.flux = ccf.flux[:,mask]
@@ -257,6 +273,14 @@ class KpV:
             self.kpVec = self.planet.Kp + np.arange(-kp_radius, kp_radius, self.dRV)
             self.vrestVec = np.arange(-vrest_max, vrest_max, self.dRV)
             self.bkg = bkg
+            
+            
+            self.num_cpus = 6 # for the functions that allow parallelisation
+            
+    def shift_vsys(self, iObs):
+        print(iObs)
+        outRV = self.vrestVec + self.rv_planet[iObs]
+        return interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV)    
         
     def run(self, snr=True, ignore_eclipse=False, ax=None):
         '''Generate a Kp-Vsys map
@@ -266,24 +290,24 @@ class KpV:
              
         if ignore_eclipse:   
             self.ccf.mask_eclipse(self.planet)
-            self.planet.mask_eclipse(debug=True) ## TESTING
-            
-#        if self.planet.RV.size != self.ccf.shape[0]:
-#            print('Interpolate planet...')
-#            newX = np.arange(0, self.ccf.shape[0],1)
-#            self.planet = self.planet.interpolate(newX)
-        
+            self.planet.mask_eclipse(debug=False)
             
         snr_map = np.zeros((len(self.kpVec), len(self.vrestVec)))
         rvel = ((self.planet.v_sys*u.km/u.s)-self.planet.BERV*u.km/u.s).value 
         
         
         for ikp in range(len(self.kpVec)):
-            rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
+            self.rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
             
             for iObs in range(self.planet.RV.size):
-                outRV = self.vrestVec + rv_planet[iObs]
-                snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV)       
+                outRV = self.vrestVec + self.rv_planet[iObs]
+                snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
+            # Attemp at parallelising with the function above (more work needed...)
+            # with mp.Pool(self.num_cpus) as p:
+            #     snr_map_i = p.map(self.shift_vsys, np.arange(self.planet.RV.size))
+                
+            # snr_map[ikp,] = sum(snr_map_i)
+            
         if snr:
             noise_map = np.std(snr_map[:,np.abs(self.vrestVec)>self.bkg])
             bkg_map = np.median(snr_map[:,np.abs(self.vrestVec)>self.bkg]) # subtract the background level
@@ -291,6 +315,8 @@ class KpV:
             self.snr = snr_map / noise_map
         else:
             self.snr = snr_map # NOT ACTUAL SIGNAL-TO-NOISE ratio (useful for computing weights)
+            
+        self.bestSNR = self.snr.max() # store info as variable
         if ax != None: self.imshow(ax=ax)
         return self
     
@@ -340,16 +366,16 @@ class KpV:
         
     def snr_max(self, display=False):
         # Locate the peak
-        bestSNR = self.snr.max()
-        ipeak = np.where(self.snr == bestSNR)
+        self.bestSNR = self.snr.max()
+        ipeak = np.where(self.snr == self.bestSNR)
         bestVr = float(self.vrestVec[ipeak[1]])
         bestKp = float(self.kpVec[ipeak[0]])
         
         if display:
             print('Peak position in Vrest = {:3.1f} km/s'.format(bestVr))
             print('Peak position in Kp = {:6.1f} km/s'.format(bestKp))
-            print('Max SNR = {:3.1f}'.format(bestSNR))
-        return(bestVr, bestKp, bestSNR)
+            print('Max SNR = {:3.1f}'.format(self.bestSNR))
+        return(bestVr, bestKp, self.bestSNR)
     
     def plot(self, fig=None, ax=None, peak=None, v_range=None, label=''):
         lims = [self.vrestVec[0],self.vrestVec[-1],self.kpVec[0],self.kpVec[-1]]
@@ -383,7 +409,12 @@ class KpV:
 
         return obj
     
-    
+    def snr_at_peak(self, peak):
+        self.indv = np.abs(self.vrestVec - peak[0]).argmin()
+        self.indh = np.abs(self.kpVec - peak[1]).argmin()
+        self.peak_snr = self.snr[self.indh,self.indv]
+        return self
+        
     def fancy_figure(self, figsize=(6,6), peak=None, v_range=None, outname=None, title=None):
         '''Plot Kp-Vsys map with horizontal and vertical slices 
         snr_max=True prints the SNR for the maximum value'''
@@ -418,18 +449,19 @@ class KpV:
         fig.colorbar(obj, ax=ax3, pad=0.05)
         if peak is None:
             peak = self.snr_max()
-            
+       # get the values     
+        self.snr_at_peak(peak)
         
-        indv = np.abs(self.vrestVec - peak[0]).argmin()
-        self.indh = np.abs(self.kpVec - peak[1]).argmin()
-        self.peak_snr = self.snr[self.indh,indv]
+        # indv = np.abs(self.vrestVec - peak[0]).argmin()
+        # self.indh = np.abs(self.kpVec - peak[1]).argmin()
+        # self.peak_snr = self.snr[self.indh,indv]
     
         row = self.kpVec[self.indh]
-        col = self.vrestVec[indv]
+        col = self.vrestVec[self.indv]
         print('Horizontal slice at Kp = {:.1f} km/s'.format(row))
         print('Vertical slice at Vrest = {:.1f} km/s'.format(col))
         ax2.plot(self.vrestVec, self.snr[self.indh,:], 'gray')
-        ax3.plot(self.snr[:,indv], self.kpVec,'gray')
+        ax3.plot(self.snr[:,self.indv], self.kpVec,'gray')
         
         
     
@@ -529,9 +561,45 @@ class Template(Datacube):
         self.wlt = self.wlt[sort]
         self.flux = self.flux[sort]
         return self
-
     
-    def shift_2D(self, RV, wave=None):
+    def interpolate(self, beta):
+        cs = splrep(self.wlt*beta, self.flux)
+        if np.isnan(cs[1]).any():
+                gflux = interp1d(self.wlt*beta, self.flux)(self.new_wlt)
+        else:
+            gflux = splev(self.new_wlt, cs)
+        return gflux
+    
+    def crop(self, wave, eps=0.1):
+        span = wave.max() - wave.min()
+        mask = self.wlt < (wave.min()-(eps*span))
+        mask += self.wlt > (wave.max()+(eps*span))
+        self.wlt = self.wlt[~mask]
+        self.flux = self.flux[~mask]
+        return self
+        
+        
+    def shift_2D(self, RV, wave=None, num_cpus=6):
+        
+        c = const.c.to('km/s').value
+        self.rv = RV
+        beta = 1 - (self.rv/c)
+        
+        temp = self.copy()
+        if not wave is None: 
+            temp.crop(wave)
+            temp.new_wlt = wave
+        
+        
+        with mp.Pool(num_cpus) as p:
+                output = p.map(temp.interpolate, beta)
+                
+        temp.gflux = np.array(output)
+        temp.wlt = temp.new_wlt
+        return temp
+    
+    
+    def shift_2D_slow(self, RV, wave=None):
         temp = self.copy()
         c = const.c.to('km/s').value
         self.rv = RV
