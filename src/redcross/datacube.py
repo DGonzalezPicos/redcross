@@ -10,7 +10,7 @@ from astropy.convolution import Gaussian1DKernel, convolve_fft
 import warnings
 warnings.simplefilter("ignore")
 # np.seterr(all="ignore")
-
+import multiprocessing as mp
 
 
 class Datacube:
@@ -71,13 +71,17 @@ class Datacube:
         return ax
         
 
-    def imshow(self, fig=None, ax=None, stretch=3.,title='',**kwargs):
+    def imshow(self, fig=None, ax=None, s=3.,title='', vrange=None, **kwargs):
         
         # nans = np.isnan(self.wlt)
-        if stretch > 0.:
-            vmin = np.nanmean(self.flux)-np.nanstd(self.flux) * stretch
-            vmax = np.nanmean(self.flux)+np.nanstd(self.flux) * stretch
-        else:
+        if not vrange is None: 
+            s=-1.
+            vmin = vrange[0]
+            vmax = vrange[-1]
+        if s > 0.:
+            vmin = np.nanmean(self.flux)-np.nanstd(self.flux) * s
+            vmax = np.nanmean(self.flux)+np.nanstd(self.flux) * s
+        if s == 0:
             vmin = np.nanmin(self.flux)
             vmax = np.nanmax(self.flux)
             
@@ -97,7 +101,7 @@ class Datacube:
         current_cmap.set_bad(color='white')
         ax.set(title=title)
 
-        return ax
+        return obj
     
     # FAST version
     def estimate_noise(self):
@@ -133,34 +137,54 @@ class Datacube:
         0.0001599740894897 / (38.92568793293 - s**2))
         return(wlA*n)
     
-    def inject_signal(self, planet, template, factor=1., ax=None):
-        temp = deepcopy(template) # important
+    def inject_signal(self, planet, template, RV=None, factor=1., ax=None):
+        temp = template.copy()
         
-        beta = 1 - (planet.RV/const.c.to('km/s').value)
-        # print(beta)
-        # wl_shift = np.outer(beta, self.wlt) # (nObs, nPix) matrix
+        if factor > 0.: temp.boost(factor)
         
-        temp.flux = (temp.flux - 1.)*factor # DARIO MARCH 30TH 2022
-        temp.flux += 1.
+        # get 2D template shifted at given RV or at planet.RV if no RV vector is passed
+        if RV is None:
+            RVt = planet.RV
+        else:
+            RVt = RV*np.ones_like(planet.RV)
 
-        ##
-        mask = self.mask_eclipse(planet, return_mask=True)
-        # print(mask)
-        # mask is True for in-eclipse points
+        temp = temp.shift_2D(RVt, self.wlt)
         
-        ##
-        cs = splrep(temp.wlt, temp.flux) # coefficient spline
-        for k in np.argwhere(mask==False):
-            exp = int(k)
-            if np.isnan(cs[1]).any():
-                inject_flux = interp1d(temp.wlt*beta[exp], temp.flux)(self.wlt)
-            else:
-                inject_flux = splev(self.wlt*beta[exp], cs)
-                
-            self.flux[exp] *= inject_flux
-            
+        # inject only for out-of-eclipse frames
+        mask = self.mask_eclipse(planet, return_mask=True)
+        self.flux[~mask,:] *= temp.flux[~mask,:]
+        
         if ax != None: self.imshow(ax=ax)
         return self
+    
+    # def inject_signal(self, planet, template, factor=1., ax=None):
+    #     temp = deepcopy(template) # important
+        
+    #     beta = 1 - (planet.RV/const.c.to('km/s').value)
+    #     # print(beta)
+    #     # wl_shift = np.outer(beta, self.wlt) # (nObs, nPix) matrix
+        
+    #     temp.flux = (temp.flux - 1.)*factor # DARIO MARCH 30TH 2022
+    #     temp.flux += 1.
+
+    #     ##
+    #     mask = self.mask_eclipse(planet, return_mask=True)
+    #     # print(mask)
+    #     # mask is True for in-eclipse points
+        
+    #     ##
+    #     cs = splrep(temp.wlt, temp.flux) # coefficient spline
+    #     for k in np.argwhere(mask==False):
+    #         exp = int(k)
+    #         if np.isnan(cs[1]).any():
+    #             inject_flux = interp1d(temp.wlt*beta[exp], temp.flux)(self.wlt)
+    #         else:
+    #             inject_flux = splev(self.wlt*beta[exp], cs)
+                
+    #         self.flux[exp] *= inject_flux
+            
+    #     if ax != None: self.imshow(ax=ax)
+    #     return self
     
     
     def order(self, o):
@@ -265,15 +289,17 @@ class Datacube:
         '''Fit a second order polynomial to each column and divide(subtract) the fit 
         in linear(log) space'''
         nans = np.isnan(self.wlt)
+        
         if log_space:
-            for j in range(self.nPix):
+            for j in np.where(nans==False)[0]:
                 y = np.log(self.flux[:,j])
                 fit = np.poly1d(np.polyfit(self.airmass,y,2))(self.airmass)
                 self.flux[:,j] = np.exp(y - fit)
         else:
 #            for j in range(self.nPix):
-            for pix in np.argwhere(nans==False):
-                j = int(pix)
+            # for pix in np.argwhere(nans==False):
+            #     j = int(pix)
+            for j in np.where(nans==False)[0]:
                 y = self.flux[:,j]
                 fit = np.poly1d(np.polyfit(self.airmass,y,2))(self.airmass)
                 self.flux[:,j] /= fit
@@ -503,7 +529,7 @@ class Datacube:
         if ax != None: self.imshow(ax=ax)
         return self
     
-    def mask_eclipse(self, planet_in, t_14=0.18, return_mask=False, 
+    def mask_eclipse(self, planet_in, return_mask=False, 
                      invert_mask=False, debug=False):
         '''given the planet PHASE and duration of eclipse `t_14` in days
         return the datacube with the frames masked'''
@@ -511,9 +537,9 @@ class Datacube:
         planet = deepcopy(planet_in)
         shape_in = self.shape
         phase = planet.phase
-        phase_14 = (t_14 % planet.P) / planet.P
-
-        mask = (phase > (0.50 - (0.50*phase_14)))*(phase < (0.50 + (0.50*phase_14)))
+        phase_14 = 0.5 * ((planet.T_14) % planet.P) / planet.P
+        
+        mask = np.abs(phase - 0.50) < phase_14 # frames IN-eclipse
         if invert_mask:
             mask = ~mask
             
@@ -641,6 +667,18 @@ class Datacube:
         self = Align(dco).apply_shifts(ax=ax).dco
         return self
 
+    def shift(self, RV):
+        '''copy of `to_stellar_frame` for any RV'''
+        if isinstance(RV, np.floating):
+            RV *= np.ones(self.nObs)
+        self.sort_wave()
+        nans = np.isnan(self.wlt)
+        beta = 1.0 - (RV*u.km/u.s/const.c).decompose().value
+        for f in range(self.nObs):
+            cs = splrep(self.wlt[~nans], self.flux[f,~nans])
+            self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
+
+        return self
     
     def to_stellar_frame(self, BERV):
         '''given a single-order datacube and a BERV vector in km/s
@@ -664,9 +702,10 @@ class Datacube:
         sys = SysRem(self).run(n, mode, debug, outdir)
         nans =  np.isnan(self.wlt)
         
-        if mode == 'gibson':
-            self.flux[:, ~nans] = self.flux[:,~nans] / sys.sysrem_model
-        else:
+        if mode == 'divide':
+            self.flux[:, ~nans] /= (1. + sys.sysrem_model)
+            self.sysrem_model = sys.sysrem_model
+        elif mode == 'subtract':
             self.flux[:, ~nans] = sys.r_ij
        
         if ax != None: self.imshow(ax=ax)
@@ -735,6 +774,43 @@ class Datacube:
         for key in keys:
             setattr(dc, key, np.hstack(getattr(self, key)))
         return dc
+    
+    def interpolate_to_planet(self, i):
+        '''help function to parallelise `to_planet_frame` '''
+        # cs = splrep(self.wlt, self.flux[i,])
+        c = 2.998e5
+        beta = 1 + (self.planet.RV[i]/c)
+        # flux_i = splev(self.wlt*beta, cs)
+        
+        flux_i = interp1d(self.wlt, self.flux[i,], bounds_error=False, fill_value=0.)(self.wlt*beta)
+        
+        return flux_i
+    
+    def to_planet_frame(self, planet, ax=None, num_cpus=6):
+        dco = self.copy()
+        dco.planet = planet
+        with mp.Pool(num_cpus) as p:
+            flux_i = p.map(dco.interpolate_to_planet, np.arange(self.nObs))
+        
+        dco.flux = np.array(flux_i)
+        
+      
+        if ax != None: dco.imshow(ax=ax)
+        dco.frame = 'planet'
+        return dco
+    
+    def crop(self, wave, eps=0.1):
+        span = wave.max() - wave.min()
+        mask = self.wlt < (wave.min()-(eps*span))
+        mask += self.wlt > (wave.max()+(eps*span))
+        self.wlt = self.wlt[~mask]
+        self.flux = self.flux[:,~mask]
+        return self
+    
+    def resample(self, wave):
+        cs = splrep(self.wlt, self.flux)
+        self.flux = splev(wave, cs)
+        return self
 #  
 #            
 if __name__ == '__main__':

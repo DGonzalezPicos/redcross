@@ -64,7 +64,7 @@ class Planet:
     @property
     def RV(self):
         #Derive the instantaneous radial velocity at which the planet is expected to be.
-        RV_planet = ((np.sin(2*np.pi*self.phase)*self.v_orb*np.sin(np.radians(self.i)))).value
+        RV_planet = np.sin(2*np.pi*self.phase)*self.Kp
         if self.frame == 'stellar':
             rvel = 0.0
         elif self.frame == 'telluric':

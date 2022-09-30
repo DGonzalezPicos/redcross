@@ -12,8 +12,8 @@ class SysRem:
         self.nans = np.isnan(dco.wlt)
         self.r_ij  = np.array(dco.flux[:,~self.nans], dtype=np.float32)
         self.r_ij = (self.r_ij.T - np.nanmedian(self.r_ij, axis=1)).T
-        self.sysrem_model = np.zeros_like(self.r_ij) # for Gibson method
-        self.o = dco.o
+        self.sysrem_model = np.zeros_like(self.r_ij) # store the cumulative model
+        self.o = dco.o # save the order number for book-keeping
         
         
         
@@ -92,15 +92,10 @@ class SysRem:
         # Store values in class instance
         self.a_j = a
         self.c_i = c
-        if mode == 'divide':
-            self.r_ij /= m
-            self.sigma_ij /= m
-        elif mode == 'subtract':
-            self.r_ij -= m
+
+        self.r_ij -= m
             
-        elif mode == 'gibson':
-            self.r_ij -= m
-            self.sysrem_model += m
+        self.sysrem_model += m
             
         if debug: 
             std = np.nanmean(np.nanstd(self.r_ij, axis=1))

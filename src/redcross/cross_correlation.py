@@ -6,8 +6,8 @@ from copy import deepcopy
 import astropy.units as u
 import astropy.constants as const
 from .datacube import Datacube
-import multiprocessing as mp
-
+# import multiprocessing as mp
+from pathos.pools import ProcessPool
 
 class CCF(Datacube):
     mode = 'ccf'
@@ -24,9 +24,18 @@ class CCF(Datacube):
     @property
     def wlt(self):
         return self.rv
+    
+    @property
+    def snr(self):
+        rv_abs = np.abs(self.rv)
+        p40 = np.percentile(rv_abs, 40)
+        bkg = self.flux[:,rv_abs > p40]
+        ccf_1d = np.median(self.flux, axis=0)
+        ccf_1d -= np.median(bkg)
+        return ccf_1d / np.std(bkg)
 
    
-    def run(self, dc, debug=False, weighted=True, hp_window=15., ax=None):
+    def run(self, dc, debug=False, weighted=True, hp_window=0., ax=None):
         self.frame = dc.frame
         start=time.time()
         nans = np.isnan(dc.wlt)
@@ -35,15 +44,17 @@ class CCF(Datacube):
         if not hasattr(self, 'gTemp'):
             start = time.time()
             print('Computing 2D template...')
-            temp2D = self.template.shift_2D(self.rv, dc.wlt).high_pass_gaussian(window=15.)
-            self.gTemp = temp2D.gflux[:,~nans] # TESTING
+            temp2D = self.template.shift_2D(self.rv, dc.wlt)
+            if hp_window > 0.:
+                temp2D.high_pass_gaussian(window=hp_window)
+            self.gTemp = temp2D.flux[:,~nans] # TESTING
             self.gTemp -= np.nanmean(self.gTemp) 
             print('Time to build 2D template = {:.2f} s'.format(time.time()-start))
 
-        dc.estimate_noise() # testing Sept 19th 2022
+        # dc.estimate_noise() # testing Sept 19th 2022
+        data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
         
         if weighted:
-            data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
             # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
             noise2 = np.var(dc.flux[:,~nans], axis=0)
             # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
@@ -52,7 +63,7 @@ class CCF(Datacube):
 
         else:
             divide = np.sum(self.template.flux)
-            self.flux = np.dot(dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans]), self.gTemp.T) / divide
+            self.flux = np.dot(data, self.gTemp.T) / divide
                     
         if debug:
             print('Max CCF value = {:.2f}'.format(self.flux.max()))
@@ -85,62 +96,62 @@ class CCF(Datacube):
 #        self.log_L = -0.5*float(N) * np.log(sf2[:,np.newaxis] + sg2[np.newaxis,:] - (2*R))
 #        return self
     
-    def log_likelihood(self, dc):
-        start=time.time()
-        nans = np.isnan(dc.wlt)
-        self.flux = np.zeros((dc.nObs,len(self.rv)))    
-        self.template_interp1d(dc.wlt[~nans])
-        self.template.flux_interp1d -= np.nanmean(self.template.flux_interp1d)
-        Npix = dc.nPix
+    # def log_likelihood(self, dc):
+    #     start=time.time()
+    #     nans = np.isnan(dc.wlt)
+    #     self.flux = np.zeros((dc.nObs,len(self.rv)))    
+    #     self.template_interp1d(dc.wlt[~nans])
+    #     self.template.flux_interp1d -= np.nanmean(self.template.flux_interp1d)
+    #     Npix = dc.nPix
         
-        self.flux = np.zeros((dc.nObs,len(self.rv)))   # CCF values
-        self.log_L = np.zeros((dc.nObs,len(self.rv)))  # Log-L values
+    #     self.flux = np.zeros((dc.nObs,len(self.rv)))   # CCF values
+    #     self.log_L = np.zeros((dc.nObs,len(self.rv)))  # Log-L values
         
-        for i in range(dc.nObs):
-            sf2 = np.dot(dc.flux[i,:], dc.flux[i,:]) / float(Npix)
-            sg2 = np.dot(self.template.flux_interp1d[i,:], self.template.flux_interp1d[i,:]) / float(Npix)
-            R = dc.flux[i,:].dot(self.template.flux_interp1d[i,:].T)/ float(Npix)
+    #     for i in range(dc.nObs):
+    #         sf2 = np.dot(dc.flux[i,:], dc.flux[i,:]) / float(Npix)
+    #         sg2 = np.dot(self.template.flux_interp1d[i,:], self.template.flux_interp1d[i,:]) / float(Npix)
+    #         R = dc.flux[i,:].dot(self.template.flux_interp1d[i,:].T)/ float(Npix)
             
-            print('sf2 ', sf2.shape)
-            print('sg2 ', sg2.shape)
-            print('R', R.shape)
-            self.log_L[i,:] += (-0.5*Npix * np.log(sf2+sg2-2.0*R)) #the equation of logL
+    #         print('sf2 ', sf2.shape)
+    #         print('sg2 ', sg2.shape)
+    #         print('R', R.shape)
+    #         self.log_L[i,:] += (-0.5*Npix * np.log(sf2+sg2-2.0*R)) #the equation of logL
             
-        print('Elapsed time: {:.2f} s'.format(time.time()-start))
-        return self
+    #     print('Elapsed time: {:.2f} s'.format(time.time()-start))
+    #     return self
     
-    def xcorr(self, f,g):
-        nx = len(f)
-#        I = np.ones(nx)
-#        f -= np.dot(f,I)/nx
-#        g -= np.dot(g,I)/nx
-        f -= np.mean(f)
-        g -= np.mean(g)
-        R = np.dot(f,g)/nx
-        varf = np.dot(f,f)/nx
-        varg = np.dot(g,g)/nx
+#     def xcorr(self, f,g):
+#         nx = len(f)
+# #        I = np.ones(nx)
+# #        f -= np.dot(f,I)/nx
+# #        g -= np.dot(g,I)/nx
+#         f -= np.mean(f)
+#         g -= np.mean(g)
+#         R = np.dot(f,g)/nx
+#         varf = np.dot(f,f)/nx
+#         varg = np.dot(g,g)/nx
 
-        CC = R / np.sqrt(varf*varg)
-        log_L = -0.5*nx * np.log(varf + varg - (2*R))
-        print(varf, varg, R)
-        return CC, log_L
+#         CC = R / np.sqrt(varf*varg)
+#         log_L = -0.5*nx * np.log(varf + varg - (2*R))
+#         print(varf, varg, R)
+#         return CC, log_L
     
-    def get_cc_grid(self, dco):
-        nans = np.isnan(dco.wlt)
-        self.flux, self.log_L = (np.zeros((dco.nObs,len(self.rv))) for _ in range(2))
-        self.template.flux -= np.median(self.template.flux)
+    # def get_cc_grid(self, dco):
+    #     nans = np.isnan(dco.wlt)
+    #     self.flux, self.log_L = (np.zeros((dco.nObs,len(self.rv))) for _ in range(2))
+    #     self.template.flux -= np.median(self.template.flux)
         
-        coef_spline = splrep(self.template.wlt, self.template.flux, s=0.0)
-        beta = self.rv / 2.998E5
-        for irv in range(self.rv.size):
-            # Shifting data wlen instead by swapping sign of RV
-            wShift = dco.wlt[~nans] * np.sqrt( (1-beta[irv]) / (1+beta[irv]) )  # A (nPix) vector
-            intMod = splev(wShift,coef_spline,der=0) # A (nPix) vector
-            for iObs in range(dco.nObs):
-                CC, log_L = self.xcorr(dco.flux[iObs,~nans], intMod)
-                self.flux[iObs,irv] = CC
-                self.log_L[iObs,irv] = log_L
-        return self
+    #     coef_spline = splrep(self.template.wlt, self.template.flux, s=0.0)
+    #     beta = self.rv / 2.998E5
+    #     for irv in range(self.rv.size):
+    #         # Shifting data wlen instead by swapping sign of RV
+    #         wShift = dco.wlt[~nans] * np.sqrt( (1-beta[irv]) / (1+beta[irv]) )  # A (nPix) vector
+    #         intMod = splev(wShift,coef_spline,der=0) # A (nPix) vector
+    #         for iObs in range(dco.nObs):
+    #             CC, log_L = self.xcorr(dco.flux[iObs,~nans], intMod)
+    #             self.flux[iObs,irv] = CC
+    #             self.log_L[iObs,irv] = log_L
+    #     return self
         
         
     
@@ -185,13 +196,13 @@ class CCF(Datacube):
     
 
     
-    def template_interp1d(self, new_wlt):
-        gTemp = np.zeros((len(self.rv), len(new_wlt)))
-        for i in range(len(self.rv)):
-            beta = 1+self.rv[i]*u.km/u.s /const.c
-            cs = splrep(self.template.wlt*beta,self.template.flux)
-            gTemp[i,:] = splev(new_wlt, cs)
-        return gTemp
+    # def template_interp1d(self, new_wlt):
+    #     gTemp = np.zeros((len(self.rv), len(new_wlt)))
+    #     for i in range(len(self.rv)):
+    #         beta = 1+self.rv[i]*u.km/u.s /const.c
+    #         cs = splrep(self.template.wlt*beta,self.template.flux)
+    #         gTemp[i,:] = splev(new_wlt, cs)
+    #     return gTemp
     
     def mask_eclipse(self, planet, debug=False):
         '''given the planet PHASE and duration of eclipse `t_14` in days
@@ -217,14 +228,18 @@ class CCF(Datacube):
         flux_i = splev(self.rv+self.planet.RV[i], cs)
         return flux_i
     
-    def to_planet_frame(self, planet, ax=None, num_cpus=6):
+    def to_planet_frame(self, planet, ax=None, num_cpus=6, return_self=False):
         ccf = self.copy()
+        ccf.planet = planet
         # for i in range(self.nObs):
         #     cs = splrep(ccf.rv, ccf.flux[i,])
         #     ccf.flux[i,] = splev(ccf.rv+planet.RV[i], cs)
-        ccf.planet = planet
-        with mp.Pool(num_cpus) as p:
-            flux_i = p.map(ccf.interpolate_to_planet, np.arange(self.nObs))
+        
+        # with mp.Pool(num_cpus) as p:
+            # flux_i = p.map(ccf.interpolate_to_planet, np.arange(self.nObs))
+            
+        pool = ProcessPool(nodes=num_cpus)
+        flux_i = pool.amap(ccf.interpolate_to_planet, np.arange(self.nObs)).get()
         
         ccf.flux = np.array(flux_i)
         
@@ -233,6 +248,10 @@ class CCF(Datacube):
         ccf.flux = ccf.flux[:,mask]
         if ax != None: ccf.imshow(ax=ax)
         ccf.frame = 'planet'
+        if return_self:
+            self.rv_planet = ccf.rv
+            self.flux_planet = ccf.flux
+            return self
         return ccf
     
     def eclipse_label(self, planet, ax, x_rv=None, c='w'):
@@ -253,6 +272,19 @@ class CCF(Datacube):
         ax.plot(self.planet.RV[mask], self.planet.phase[mask], '--r')
         ax.plot(self.planet.RV[-10:], self.planet.phase[-10:], '--r')
         return ax
+    
+    def autoccf(self):
+        self.flux = np.zeros_like(self.rv)
+        wave, flux = self.template.wlt, self.template.flux
+
+        c = 2.998e5
+        beta = 1 + (self.rv/c)
+        for i in range(self.rv.size):
+            fxt_i = interp1d(wave*beta[i], flux, fill_value="extrapolate")(wave)
+            self.flux[i,] = np.dot(flux, fxt_i) / np.sum(fxt_i)
+        return self
+
+    
         
 
     
@@ -497,15 +529,19 @@ class KpV:
             setattr(self, key, d[key])
         return self 
     
-    def plot_1D(self, peak, ax, v_range=None):
+    def plot_1D(self, peak, ax, v_range=None, label=None, return_data=False, **kwargs):
         # ind_vsys0 = np.abs(self.vrestVec - peak[0]).argmin()
         ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
         # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
-        ax.plot(self.vrestVec, self.snr[ind_kp0,:], label='Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0]))
+        label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
+        ax.plot(self.vrestVec, self.snr[ind_kp0,:], label=label, **kwargs)
         ax.set(xlabel='$\Delta V_{{sys}}$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
         if not v_range is None: ax.set_ylim(v_range)
         ax.legend(frameon=False, loc='upper right')
-        return ax
+        if return_data:
+            return self.snr[ind_kp0,:]
+        else:
+            return ax
     
     def merge_kpvs(self, kpv_list):
         new_kpv = kpv_list[0].copy()
@@ -522,226 +558,7 @@ class KpV:
 
     
         
-class Template(Datacube):
-    def __init__(self, wlt=None, flux=None, filepath=None):
-        if not filepath is None:
-            self.filepath = filepath
-            self.wlt, self.flux = np.load(self.filepath)
-        else:
-            self.wlt = wlt
-            self.flux = flux
-    @property
-    def resolution(self):
-        return np.round(np.median(self.wlt) / np.mean(np.diff(self.wlt)), 0)
-                   
-            
-    def plot(self, ax=None, mode='1D', **kwargs):
-        ax = ax or plt.gca()
-        if mode == '1D':
-            if not self.wlt.shape==self.flux.shape:
-                ax.plot(self.wlt, self.gflux[0], **kwargs)
-            else:
-                ax.plot(self.wlt, self.flux, **kwargs)
-        elif mode == '2D':
-            ext = [self.wlt.min(), self.wlt.max(), self.rv.min(), self.rv.max()]
-            ax.imshow(self.gflux, origin='lower', aspect='auto', extent=ext, **kwargs)
-            ax.set(ylabel='RV (km/s)')
-        return ax
-    
-    
-    def sort(self):
-        '''
-        Sort `wlt` and `flux` vectors by wavelength.
 
-        Returns
-        sorted Template
-        -------
-        '''
-        sort = np.argsort(self.wlt)
-        self.wlt = self.wlt[sort]
-        self.flux = self.flux[sort]
-        return self
-    
-    def interpolate(self, beta):
-        cs = splrep(self.wlt*beta, self.flux)
-        if np.isnan(cs[1]).any():
-                gflux = interp1d(self.wlt*beta, self.flux)(self.new_wlt)
-        else:
-            gflux = splev(self.new_wlt, cs)
-        return gflux
-    
-    def crop(self, wave, eps=0.1):
-        span = wave.max() - wave.min()
-        mask = self.wlt < (wave.min()-(eps*span))
-        mask += self.wlt > (wave.max()+(eps*span))
-        self.wlt = self.wlt[~mask]
-        self.flux = self.flux[~mask]
-        return self
-        
-        
-    def shift_2D(self, RV, wave=None, num_cpus=6):
-        
-        c = const.c.to('km/s').value
-        self.rv = RV
-        beta = 1 - (self.rv/c)
-        
-        temp = self.copy()
-        if not wave is None: 
-            temp.crop(wave)
-            temp.new_wlt = wave
-        
-        
-        with mp.Pool(num_cpus) as p:
-                output = p.map(temp.interpolate, beta)
-                
-        temp.gflux = np.array(output)
-        temp.wlt = temp.new_wlt
-        return temp
-    
-    
-    def shift_2D_slow(self, RV, wave=None):
-        temp = self.copy()
-        c = const.c.to('km/s').value
-        self.rv = RV
-        beta = 1 - (self.rv/c)
-        
-        
-        if not wave is None: 
-            temp.wlt = wave
-        
-        temp.gflux = np.zeros((self.rv.size, temp.wlt.size))
-        # cs = splrep(wave_in*beta[j], self.flux)
-        for j in range(self.rv.size):
-            cs = splrep(self.wlt*beta[j], temp.flux)
-            if np.isnan(cs[1]).any():
-                temp.gflux[j,] = interp1d(self.wlt*beta[j], temp.flux)(temp.wlt)
-            else:
-                temp.gflux[j,] = splev(temp.wlt, cs)
-        return temp
-    
-    def load_TP(self):
-        path = 'data/PT-two_point_profile.npy'
-        return np.load(path)
-    
-    def vactoair(self):
-        """VACUUM to AIR conversion as actually implemented by wcslib.
-        Input wavelength with astropy.unit
-        """
-        cenwave0 = np.median(self.wlt)
-        wave = (self.wlt*u.AA).to(u.m).value
-        n = 1.0
-        for k in range(4):
-            s = (n/wave)**2
-            n = 2.554e8 / (0.41e14 - s)
-            n += 294.981e8 / (1.46e14 - s)
-            n += 1.000064328
-        
-        print('Vacuum to air conversion...')
-        shift = shift = ((self.wlt/n) - self.wlt) / self.wlt
-        rv_shift = (np.mean(shift)* const.c).to('km/s').value
-        print('--> Shift = {:.2f} A = {:.2f} km/s'.format(np.mean(shift)*cenwave0, rv_shift))
-        
-        self.wlt = (self.wlt / n)
-        return self
-
-    def airtovac(self):
-      #Convert wavelengths (AA) in air to wavelengths (AA) in vaccuum (empirical).
-      s = 1e4 / self.wlt
-      n = 1 + (0.00008336624212083 + 0.02408926869968 / (130.1065924522 - s**2) +
-      0.0001599740894897 / (38.92568793293 - s**2))
-      self.wlt *= n
-      return self  
-
-
-    def high_pass_gaussian(self, window=None, dRV=0., debug=False):
-        from scipy import ndimage
-        if dRV > 0.:
-            pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
-            window = 2 * dRV * pixscale
-            if debug: print('window = {:.2f} pixels'.format(window))
-            
-        lowpass = ndimage.gaussian_filter1d(self.flux, window)
-        if hasattr(self, 'gflux'):
-            nans = self.nans
-            for row in range(self.gflux.shape[0]):
-                self.gflux[row,~nans] /= ndimage.gaussian_filter1d(self.gflux[row,~nans], window)
-        self.flux /= lowpass
-        return self
-    
-    
-    
-    def remove_continuum(self, exclude=None, wave_units=u.AA, ax=None):
-        from specutils.spectra import Spectrum1D, SpectralRegion
-        from specutils.fitting import fit_generic_continuum
-        from astropy import units as u
-        
-        
-        spectrum = Spectrum1D(flux=self.flux*u.Jy, spectral_axis=self.wlt*u.AA)
-        if exclude != None:
-            exclude_region = SpectralRegion(exclude[0]*wave_units, exclude[1]*wave_units)
-        else:
-            exclude_region = None
-        
-        g1_fit = fit_generic_continuum(spectrum, exclude_regions=exclude_region)
-        y_continuum_fitted = g1_fit(self.wlt*wave_units)
-        if ax != None:
-            self.plot(ax=ax, lw=0.2, label='Template')
-            ax.plot(self.wlt, y_continuum_fitted, label='Fitted continuum')
-            ax.legend()
-            plt.show()
-            
-        
-        self.flux /= y_continuum_fitted.value
-        return self
-    
-    # def convolve_instrument(self, res=50e3):
-    #     '''convolve to instrumental resolution with a Gaussian kernel'''
-    #     from astropy.convolution import Gaussian1DKernel, convolve
-        
-    #     cenwave = np.median(self.wlt)
-    #     # Create kernel
-    #     g = Gaussian1DKernel(stddev=0.5*cenwave/res) # set sigma = FWHM / 2. = lambda / R
-    #     self.flux = convolve(self.flux, g)
-    #     return self
-    
-    def resample(self, wave, mode='2D'):
-        
-        if mode == '1D':
-            cs = splrep(self.wlt, self.flux)
-            self.flux_res = splev(wave, cs)
-            
-        elif mode == '2D':
-            self.gflux_res = np.zeros((self.gflux.shape[0], wave.size))
-            for i in range(self.gflux.shape[0]):
-                cs = splrep(self.wlt, self.gflux[i,:])
-                self.gflux_res[i,:] = splev(wave, cs)
-        return self
-    
-    def pyAstro_convolve(self, row=-1):
-        from PyAstronomy import pyasl
-        if row < 0:
-            flux = self.flux
-        else:
-            flux = self.gflux[row, ~self.nans]
-        newflux = pyasl.instrBroadGaussFast(self.wlt[~self.nans], flux,
-                                            self.res, edgeHandling="firstlast", fullout=False, equid=True,maxsig=5.0)
-        
-        return newflux
-    def convolve_instrument(self, res=50e3, num_cpus=5):
-        import multiprocessing as mp
-        self.res = res
-        if hasattr(self, 'gflux'):
-            rows = np.arange(0, self.gflux.shape[0])
-            with mp.Pool(num_cpus) as p:
-                output = p.map(self.pyAstro_convolve, rows)
-                
-            self.gflux[:,~self.nans] = np.array(output)
-        else:
-            self.flux = self.pyAstro_convolve()
-        return self
-    
-    
-    
     
     
     
