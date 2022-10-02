@@ -340,8 +340,7 @@ class Datacube:
     def mask_sat_lines(self, sat=0.20, ax=None, debug=False):
         
         # nans = np.isnan(self.wlt)
-        master = np.median(self.flux, axis=0)
-        
+        master = np.median(self.flux, axis=0)        
         mask = master < sat
         self.wlt[mask] = np.nan
         self.flux[:,mask] = np.nan
