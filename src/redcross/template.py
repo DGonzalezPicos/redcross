@@ -57,6 +57,8 @@ class Template(Datacube):
     def interpolate(self, beta=1., new_wave=None, return_self=False):
         if new_wave is None:
             new_wave = self.new_wlt
+            
+        
         cs = splrep(self.wlt*beta, self.flux)
         if np.isnan(cs[1]).any():
                 gflux = interp1d(self.wlt*beta, self.flux, bounds_error=False, fill_value=0.0)(new_wave)

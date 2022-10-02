@@ -4,9 +4,7 @@ import time
 from scipy.interpolate import interp1d, splrep, splev
 from copy import deepcopy
 import astropy.units as u
-import astropy.constants as const
 from .datacube import Datacube
-# import multiprocessing as mp
 from pathos.pools import ProcessPool
 
 class CCF(Datacube):
@@ -35,7 +33,7 @@ class CCF(Datacube):
         return ccf_1d / np.std(bkg)
 
    
-    def run(self, dc, debug=False, weighted=True, hp_window=0., ax=None):
+    def run(self, dc, debug=False, hp_window=0., ax=None):
         self.frame = dc.frame
         start=time.time()
         nans = np.isnan(dc.wlt)
@@ -43,200 +41,39 @@ class CCF(Datacube):
         
         if not hasattr(self, 'gTemp'):
             start = time.time()
-            print('Computing 2D template...')
+            # print('Computing 2D template...')
             temp2D = self.template.shift_2D(self.rv, dc.wlt)
             if hp_window > 0.:
                 temp2D.high_pass_gaussian(window=hp_window)
             self.gTemp = temp2D.flux[:,~nans] # TESTING
             self.gTemp -= np.nanmean(self.gTemp) 
-            print('Time to build 2D template = {:.2f} s'.format(time.time()-start))
+            # print('Time to build 2D template = {:.2f} s'.format(time.time()-start))
 
         # dc.estimate_noise() # testing Sept 19th 2022
         data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
         
-        if weighted:
-            # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
-            noise2 = np.var(dc.flux[:,~nans], axis=0)
-            # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
-            self.flux = np.dot(data/noise2, self.gTemp.T) 
-
-
-        else:
-            divide = np.sum(self.template.flux)
-            self.flux = np.dot(data, self.gTemp.T) / divide
+        # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
+        noise2 = np.var(dc.flux[:,~nans], axis=0)
+        # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
+        self.flux = np.dot(data/noise2, self.gTemp.T) 
                     
         if debug:
-            print('Max CCF value = {:.2f}'.format(self.flux.max()))
-            print('Baseline CCF = {:.2f}'.format(np.median(self.flux)))
             print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
+            print('CCF shape = {:}'.format(self.shape))
             
         if ax != None: self.imshow(ax=ax)
         return self
     
-#    def log_likelihood(self, dc, debug=False):
-#        nans = np.isnan(dc.wlt)
-#        N = dc.nObs
-#        # prepare data
-#        self.flux = np.zeros((N,len(self.rv)))   
-#        self.log_L = np.zeros((N,len(self.rv)))  
-#        # create 2D-template (shifted for all RVs)
-#        self.template_interp1d(dc.wlt[~nans])
-#        self.template.flux_interp1d -= np.nanmean(self.template.flux_interp1d) 
-#    
-#        # intermediate quantities
-#          # sum over pixel channels
-#        sf2 = np.sum(np.power(dc.flux,2), axis=1) / float(N)
-#        sg2 = np.sum(np.power(self.template.flux_interp1d,2), axis=1) / float(N)
-#        print('sf2 ', sf2[:,np.newaxis].shape)
-#        print('sg2 ', sg2[np.newaxis,:].shape)
-#        R = np.dot(dc.flux, self.template.flux_interp1d.T) / float(N)
-#        print('R', R.shape)
-#        # output
-#        self.flux = R / np.sqrt(np.outer(sf2,sg2)) # CCF-map
-#        self.log_L = -0.5*float(N) * np.log(sf2[:,np.newaxis] + sg2[np.newaxis,:] - (2*R))
-#        return self
-    
-    # def log_likelihood(self, dc):
-    #     start=time.time()
-    #     nans = np.isnan(dc.wlt)
-    #     self.flux = np.zeros((dc.nObs,len(self.rv)))    
-    #     self.template_interp1d(dc.wlt[~nans])
-    #     self.template.flux_interp1d -= np.nanmean(self.template.flux_interp1d)
-    #     Npix = dc.nPix
-        
-    #     self.flux = np.zeros((dc.nObs,len(self.rv)))   # CCF values
-    #     self.log_L = np.zeros((dc.nObs,len(self.rv)))  # Log-L values
-        
-    #     for i in range(dc.nObs):
-    #         sf2 = np.dot(dc.flux[i,:], dc.flux[i,:]) / float(Npix)
-    #         sg2 = np.dot(self.template.flux_interp1d[i,:], self.template.flux_interp1d[i,:]) / float(Npix)
-    #         R = dc.flux[i,:].dot(self.template.flux_interp1d[i,:].T)/ float(Npix)
-            
-    #         print('sf2 ', sf2.shape)
-    #         print('sg2 ', sg2.shape)
-    #         print('R', R.shape)
-    #         self.log_L[i,:] += (-0.5*Npix * np.log(sf2+sg2-2.0*R)) #the equation of logL
-            
-    #     print('Elapsed time: {:.2f} s'.format(time.time()-start))
-    #     return self
-    
-#     def xcorr(self, f,g):
-#         nx = len(f)
-# #        I = np.ones(nx)
-# #        f -= np.dot(f,I)/nx
-# #        g -= np.dot(g,I)/nx
-#         f -= np.mean(f)
-#         g -= np.mean(g)
-#         R = np.dot(f,g)/nx
-#         varf = np.dot(f,f)/nx
-#         varg = np.dot(g,g)/nx
-
-#         CC = R / np.sqrt(varf*varg)
-#         log_L = -0.5*nx * np.log(varf + varg - (2*R))
-#         print(varf, varg, R)
-#         return CC, log_L
-    
-    # def get_cc_grid(self, dco):
-    #     nans = np.isnan(dco.wlt)
-    #     self.flux, self.log_L = (np.zeros((dco.nObs,len(self.rv))) for _ in range(2))
-    #     self.template.flux -= np.median(self.template.flux)
-        
-    #     coef_spline = splrep(self.template.wlt, self.template.flux, s=0.0)
-    #     beta = self.rv / 2.998E5
-    #     for irv in range(self.rv.size):
-    #         # Shifting data wlen instead by swapping sign of RV
-    #         wShift = dco.wlt[~nans] * np.sqrt( (1-beta[irv]) / (1+beta[irv]) )  # A (nPix) vector
-    #         intMod = splev(wShift,coef_spline,der=0) # A (nPix) vector
-    #         for iObs in range(dco.nObs):
-    #             CC, log_L = self.xcorr(dco.flux[iObs,~nans], intMod)
-    #             self.flux[iObs,irv] = CC
-    #             self.log_L[iObs,irv] = log_L
-    #     return self
-        
-        
-    
-    def compute(self, dc):
-        '''
-        Basic CCF. Given a 1D template (on the CCF definition)
-        and a 2D datacube, shift and resampled the
-        template on the data wavelength grid for all RV-shifts.
-
-        Parameters
-        ----------
-        dc : datacube
-            reduced datacube.
-
-        Returns
-        -------
-        TYPE
-            CCF object with new attribute `flux` containing the CCF values.
-
-        '''
-        self.frame = dc.frame # store info 
-        print('Compute CCF...')
-        start=time.time()
-        nans = np.isnan(dc.wlt) # manage masked pixel columns
-        # Subtract mean of TEMPLATE (m=model) and DATA (R=residuals)
-        wave_m = self.template.wlt
-        wave_R = dc.wlt[~nans]
-        m = self.template.flux - np.mean(self.template.flux)
-        R = dc.flux[:,~nans] - np.nanmean(dc.flux[:,~nans])
-        # Prepare CCF matrix
-        self.flux = np.zeros((dc.nObs,len(self.rv)))
-        # Get adimensional RV-shift vector
-        beta = 1+self.rv*u.km/u.s /const.c
-        # Loop over each RV-shift
-        for i in range(len(self.rv)):
-            g = interp1d(wave_m*beta[i], m)(wave_R) # shift and resample in one step
-            self.flux[:,i] = np.dot(R, g)/np.sum(g)
-            
-        # self.flux /= np.mean(self.flux,axis=0)
-        print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
-        return self
-    
-
-    
-    # def template_interp1d(self, new_wlt):
-    #     gTemp = np.zeros((len(self.rv), len(new_wlt)))
-    #     for i in range(len(self.rv)):
-    #         beta = 1+self.rv[i]*u.km/u.s /const.c
-    #         cs = splrep(self.template.wlt*beta,self.template.flux)
-    #         gTemp[i,:] = splev(new_wlt, cs)
-    #     return gTemp
-    
-    def mask_eclipse(self, planet, debug=False):
-        '''given the planet PHASE and duration of eclipse `t_14` in days
-        return the datacube with the frames masked'''
-        shape_in = self.shape
-        phase = planet.phase
-        phase_14 = (planet.T_14 % planet.P) / planet.P
-    
-        mask = np.abs(phase - 0.50) < (phase_14/2.) # frames IN-eclipse
-#        print(phase_14)
-#        mask = (phase > (0.50 - (0.50*phase_14)))*(phase < (0.50 + (0.50*phase_14)))
-        self.flux = self.flux[~mask,:]
-      
-        if debug:
-            print('Original self.shape = {:}'.format(shape_in))
-            print('After ECLIPSE masking self.shape = {:}'.format(self.shape))
-                        
-        return self
     
     def interpolate_to_planet(self, i):
         '''help function to parallelise `to_planet_frame` '''
-        cs = splrep(self.rv, self.flux[i,])
-        flux_i = splev(self.rv+self.planet.RV[i], cs)
+        inter = interp1d(self.rv, self.flux[i,], bounds_error=False, fill_value=0.0)
+        flux_i = inter(self.rv+self.planet.RV[i])
         return flux_i
     
     def to_planet_frame(self, planet, ax=None, num_cpus=6, return_self=False):
         ccf = self.copy()
         ccf.planet = planet
-        # for i in range(self.nObs):
-        #     cs = splrep(ccf.rv, ccf.flux[i,])
-        #     ccf.flux[i,] = splev(ccf.rv+planet.RV[i], cs)
-        
-        # with mp.Pool(num_cpus) as p:
-            # flux_i = p.map(ccf.interpolate_to_planet, np.arange(self.nObs))
             
         pool = ProcessPool(nodes=num_cpus)
         flux_i = pool.amap(ccf.interpolate_to_planet, np.arange(self.nObs)).get()
@@ -273,6 +110,8 @@ class CCF(Datacube):
         ax.plot(self.planet.RV[-10:], self.planet.phase[-10:], '--r')
         return ax
     
+    
+    
     def autoccf(self):
         self.flux = np.zeros_like(self.rv)
         wave, flux = self.template.wlt, self.template.flux
@@ -284,12 +123,6 @@ class CCF(Datacube):
             self.flux[i,] = np.dot(flux, fxt_i) / np.sum(fxt_i)
         return self
 
-    
-        
-
-    
-
-    
                 
                 
 class KpV:

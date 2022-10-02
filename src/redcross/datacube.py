@@ -52,7 +52,7 @@ class Datacube:
         return np.round(nans[nans==True].size / nans.size, 4)
 
 # =============================================================================
-#                       UTILITY FUNCTIONS   
+#                       FUNCTIONS   
 # =============================================================================
     def get_header(self):
         keys_to_extract = ['airmass','MJD','BERV','RA_DEG','DEC_DEG','DATE']    
@@ -156,35 +156,6 @@ class Datacube:
         
         if ax != None: self.imshow(ax=ax)
         return self
-    
-    # def inject_signal(self, planet, template, factor=1., ax=None):
-    #     temp = deepcopy(template) # important
-        
-    #     beta = 1 - (planet.RV/const.c.to('km/s').value)
-    #     # print(beta)
-    #     # wl_shift = np.outer(beta, self.wlt) # (nObs, nPix) matrix
-        
-    #     temp.flux = (temp.flux - 1.)*factor # DARIO MARCH 30TH 2022
-    #     temp.flux += 1.
-
-    #     ##
-    #     mask = self.mask_eclipse(planet, return_mask=True)
-    #     # print(mask)
-    #     # mask is True for in-eclipse points
-        
-    #     ##
-    #     cs = splrep(temp.wlt, temp.flux) # coefficient spline
-    #     for k in np.argwhere(mask==False):
-    #         exp = int(k)
-    #         if np.isnan(cs[1]).any():
-    #             inject_flux = interp1d(temp.wlt*beta[exp], temp.flux)(self.wlt)
-    #         else:
-    #             inject_flux = splev(self.wlt*beta[exp], cs)
-                
-    #         self.flux[exp] *= inject_flux
-            
-    #     if ax != None: self.imshow(ax=ax)
-    #     return self
     
     
     def order(self, o):
@@ -365,51 +336,6 @@ class Datacube:
                 
         if ax != None: self.imshow(ax=ax)
         return self
-    
-#    def mask_cols(self, sigma=3., mode='flux', cycles=1, nan=True, debug=False, ax=None):
-#
-#        k = 0
-#        while k < cycles:
-#            if mode == 'flux':
-#                y = np.nanstd(self.flux, axis=0)
-#                
-#            elif mode == 'flux_err':
-#                if self.flux_err is None:
-#                    self.estimate_noise()
-#                y = np.nanstd(self.flux_err, axis=0)
-#                
-#            mean, std = np.nanmean(y), np.nanstd(y)
-#            mask = np.abs(y - mean) > (sigma * std)
-#
-#            n = mask.size
-#            frac_masked = mask[mask==True].size*100/n
-#            
-#            if frac_masked < 10.:
-#                self.wlt[mask] = np.nan
-#                self.flux[:,mask] = np.nan
-#                if not self.flux_err is None:
-#                    self.flux_err[:,mask] = np.nan 
-#                
-#                k += 1 # good job! go to next iteration
-#            else:
-#                sigma *= 1.2 # increase by 20% and try again
-#                print('--> {:.2f} % pixels to mask...'.format(frac_masked))
-#                print('--> Trying again with sigma = {:.1f}...'.format(sigma))
-#                continue
-#    
-#
-#            if (self.nan_frac*100) > 15.: # control point to avoid over-masking with more iterations
-##                if debug:
-##                    print('** Exit at iteration {:} **'.format(k))
-#                print('--> {:.2f} % of total pixels are masked <--'.format(self.nan_frac*100))
-#            return self
-#        
-#            if debug:  
-#                n = mask.size
-#                print('--> {:.2f} % of pixels masked <--'.format(frac_masked))
-#                
-#        if ax != None: self.imshow(ax=ax)
-#        return self
 #    
     def mask_sat_lines(self, sat=0.20, ax=None, debug=False):
         
@@ -428,83 +354,7 @@ class Datacube:
         return self
         
    
-    def snr_cutoff(self, cutoff=40., debug=False):
-        '''Discard columns where the SNR is below the CUTOFF
-        Apply before CCF'''
-        snr = np.nanmean(self.flux, axis=0) / np.nanstd(self.flux, axis=0)
-        if debug: print('Mean SNR = {:.2f} +- {:.2f}'.format(np.nanmean(snr), np.nanstd(snr)))
-        mask = snr < cutoff
-        self.wlt = self.wlt[~mask]
-        self.flux = self.flux[:,~mask]
-        if not self.flux_err is None:
-            self.flux_err = self.flux_err[:,~mask]
-            
-        if debug:
-            print('Input shape: {:}'.format(snr.shape))
-            print('Output shape: {:}'.format(self.wlt.shape))
-            print('--> {:} discarded pixels'.format(snr.size-self.wlt.size))
-        return self
     
-    def get_mask(self, snr_min=40, debug=False):
-        'Return a MASK with columns where the mean SNR is below `snr_min` '
-        snr = np.nanmedian(self.flux, axis=0) / np.nanstd(self.flux, axis=0)
-        if debug: print('Mean SNR = {:.2f} +- {:.2f}'.format(np.nanmean(snr), np.nanstd(snr)))
-        mask = snr < snr_min
-        
-        return mask
-    
-    def apply_mask(self, mask, mode='mask', debug=False):
-        
-        if mode=='mask':
-            self.wlt = self.wlt[~mask]
-            self.flux = self.flux[:,~mask]
-            if not self.flux_err is None:
-                self.flux_err = self.flux_err[:,~mask]
-        elif mode=='replace':
-            self.flux[:,mask] = np.nanmedian(self.flux[:,~mask])
-            if not self.flux_err is None:
-                self.flux_err[:,mask] = np.nanmedian(self.flux_err[:,~mask])
-            
-        if debug:
-            n = mask.size
-            print('--> {:.2f} % of pixels masked'.format(mask[mask==True].size*100/n))
-            print('Input shape = ', mask.shape)
-            print('Output shape = ', self.wlt.shape)
-        return self
-        
-    
-    def lowpass_filter(self, window=15):
-        'input must be a single order'
-        from scipy.signal import savgol_filter
-        for i in range(self.nObs):
-            self.flux[i,] = savgol_filter(self.flux[i,], window, 3)
-        return self
-            
-            
-    def get_master(self):
-        from functions import gaussian_smooth
-        self.master = gaussian_smooth(np.nanmedian(self.flux, axis=1), xstd=300.) # average over frames
-        return self
-    
-    # @property
-    # def SNR(self):
-    #     if self.flux_err is None:
-    #         med = np.nanmedian(self.flux)
-    #         return med / np.nanstd(self.flux)
-    #     else:
-    #         print('Using flux_err')
-    #         # return np.nanmean(np.nanmean(self.flux, axis=1)/ np.nanmean(self.flux_err, axis=1))
-    #         # return np.nanmean(self.flux / self.flux_err)
-    #         # return np.nanmedian(self.flux) / np.nanstd(self.flux)
-    #         std = np.nanstd(self.flux, axis=0)
-    #         return 1/np.nanmean(np.nanstd(self.flux, axis=0))
-    
-    # @property
-    # def Q(self):
-    #     # return 1/np.nanmean(np.nanstd(self.flux - np.nanmedian(self.flux), axis=0))
-    #     # return np.nanmean(np.nanmean(self.flux, axis=1)/np.nanstd(self.flux, axis=1))
-    #     # return np.sqrt(np.nanmean(np.var(self.flux, axis=0)))
-    #     return 1/np.nanstd(self.flux)
 
     
     
@@ -566,42 +416,6 @@ class Datacube:
                 dc.flux_err = dc.flux_err
 
             return dc
-        
-        
-    def split_detector(self):
-        '''For Giano data, split WAVELENGTH dimension in two due to detector's' response
-        Return a datacube with an additional dimension = (2xnOrders, nObs, nPix)'''
-        
-        dc = self.copy()
-        x = int(dc.nPix/2)
-
-        if len(dc.shape)>2:
-            if len(dc.wlt.shape)>1:
-                dc.wlt = np.concatenate([dc.wlt[:,x:], dc.wlt[:,:x]])
-                sort = np.argsort(np.nanmedian(dc.wlt, axis=(1,2)))
-                dc.wlt = dc.wlt[sort,:,:]
-            else:
-                dc.wlt = np.stack((dc.wlt[x:], dc.wlt[:x]))
-                sort = np.argsort(np.nanmedian(dc.wlt, axis=1))
-                dc.wlt = dc.wlt[sort,:]
-                
-            dc.flux = np.concatenate([dc.flux[:,:,x:], dc.flux[:,:,:x]])[sort,:,:]
-            if not dc.flux_err is None:
-                dc.flux_err = np.concatenate([dc.flux_err[:,:,x:], dc.flux_err[:,:,:x]])[sort,:,:]
-        else:
-            if len(dc.wlt.shape)>1:
-                dc.wlt = np.stack((dc.wlt[:,x:], dc.wlt[:,:x]))
-                sort = np.argsort(np.nanmedian(dc.wlt, axis=(1,2)))
-                dc.wlt = dc.wlt[sort,:,:]
-            else:
-                dc.wlt = np.stack((dc.wlt[x:], dc.wlt[:x]))
-                sort = np.argsort(np.nanmedian(dc.wlt, axis=1))
-                dc.wlt = dc.wlt[sort,:]
-            
-            dc.flux = np.stack((dc.flux[:,x:], dc.flux[:,:x]))[sort,:,:]
-            if not dc.flux_err is None:
-                dc.flux_err = np.stack((dc.flux_err[:,x:], dc.flux_err[:,:x]))[sort,:,:]
-        return dc
     
     def split_orders(self, debug=True):
         '''last update: ago 21 2022
@@ -624,29 +438,10 @@ class Datacube:
         if not dc.flux_err is None:
             dc.flux_err = np.concatenate([dc.flux_err[:,:,x:], dc.flux_err[:,:,:x]])[sort,:,:]
         
-        
-
         if debug:
             print(self.shape)
             print(dc.shape)
         return dc
-#    def align(self):
-#        '''Compute shift between each frame and the master spectrum wavelength grid
-#        Apply the shift to each frame and spline interpolate the flux onto the corrected grid
-#        Define the common wavelength grid as the master wavelength'''
-#        from scipy.interpolate import splrep, splev
-#        dco = self.copy()
-#        
-#        master = Datacube(wlt=np.nanmedian(dco.wlt, axis=0), flux=np.nanmedian(dco.flux, axis=0))
-#        cenwave = np.nanmedian(master.wlt)
-#        delta_wlt = np.nanmedian(master.wlt - dco.wlt, axis=1)
-#        beta = 1 + delta_wlt/cenwave
-#        for i in range(dco.nObs):
-#            cs = splrep(dco.wlt[i,], dco.flux[i,])
-#            dco.flux[i,] = splev(dco.wlt[i,]*beta[i], cs)
-#    #         dco.wlt[i] = dco.wlt[i,]*beta[i]
-#        dco.wlt = master.wlt
-#        return dco
     
     def common_wave_grid(self, wavesol):
         dco = self.copy()
@@ -680,19 +475,19 @@ class Datacube:
 
         return self
     
-    def to_stellar_frame(self, BERV):
-        '''given a single-order datacube and a BERV vector in km/s
-        spline interpolate on the shifted grid to go from telluric to stellar frame
-        NOTE: must check the correct sign of BERV
-        can also pass BERV --> BERV + Vsys'''
-        self.sort_wave()
-        nans = np.isnan(self.wlt)
-        beta = 1.0 - (BERV*u.km/u.s/const.c).decompose().value
-        for f in range(self.nObs):
-            cs = splrep(self.wlt[~nans], self.flux[f,~nans])
-            self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
+    # def to_stellar_frame(self, BERV):
+    #     '''given a single-order datacube and a BERV vector in km/s
+    #     spline interpolate on the shifted grid to go from telluric to stellar frame
+    #     NOTE: must check the correct sign of BERV
+    #     can also pass BERV --> BERV + Vsys'''
+    #     self.sort_wave()
+    #     nans = np.isnan(self.wlt)
+    #     beta = 1.0 - (BERV*u.km/u.s/const.c).decompose().value
+    #     for f in range(self.nObs):
+    #         cs = splrep(self.wlt[~nans], self.flux[f,~nans])
+    #         self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
 
-        return self
+    #     return self
 
         
     def sysrem(self, n=6, mode='subtract', debug=False, ax=None, outdir=None):
@@ -777,11 +572,8 @@ class Datacube:
     
     def interpolate_to_planet(self, i):
         '''help function to parallelise `to_planet_frame` '''
-        # cs = splrep(self.wlt, self.flux[i,])
         c = 2.998e5
-        beta = 1 + (self.planet.RV[i]/c)
-        # flux_i = splev(self.wlt*beta, cs)
-        
+        beta = 1 + (self.planet.RV[i]/c)        
         flux_i = interp1d(self.wlt, self.flux[i,], bounds_error=False, fill_value=0.)(self.wlt*beta)
         
         return flux_i

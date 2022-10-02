@@ -1,0 +1,7 @@
+# Planet properties for WASP-189b
+2.7240338 # Orbital period [day]
+0.0497 # Semi-major axis [AU]
+84.32 # Inclination [deg]
+-20.82 # Systemic velocity [km/s]
+2456706.4558 # Primary transit time [BJD], Yan+2022
+4.351199999 # Transit duration (T_14) [hours]

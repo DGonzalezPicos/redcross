@@ -332,3 +332,4 @@ examples/data/WASP33.dat
 examples/data/WASP189.dat
 examples/data/spectra_harpsn.fits
 *.fits
+docs/source/notebooks/data/datacube_reduced_orders30-41.npy

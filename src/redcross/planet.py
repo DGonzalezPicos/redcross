@@ -132,3 +132,10 @@ class Planet:
         for key in d.keys():
             setattr(self, key, d[key])
         return self    
+    
+    def trail(self, ax, frame='telluric', top=20, bottom=40, **kwargs):
+        self.frame = frame
+        ax.plot(self.RV[-top:], self.phase[-top:], '--r', **kwargs)
+        ax.plot(self.RV[:bottom], self.phase[:bottom], '--r', **kwargs)
+        return None
+        
