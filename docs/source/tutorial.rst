@@ -7,3 +7,4 @@ Tutorial
 
    notebooks/init_datacube
    notebooks/data_reduction
+   notebooks/cross_correlation
