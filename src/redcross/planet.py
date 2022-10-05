@@ -100,9 +100,6 @@ class Planet:
 #        mask = (phase > (0.50 - (0.5*phase_14)))*(phase < (0.50 + (0.5*phase_14)))
         if invert_mask:
             mask = ~mask
-    
-        
-
             
         if return_mask:
             return mask

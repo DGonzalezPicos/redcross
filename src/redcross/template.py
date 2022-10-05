@@ -13,17 +13,49 @@ import astropy.constants as const
 from .datacube import Datacube
 from pathos.pools import ProcessPool
 
+# constants in CGS
+c_cgs = 29979245800.0 # cm/s
+h = 6.62606957e-27
+kB = 1.3806488e-16 
+
 class Template(Datacube):
-    def __init__(self, wlt=None, flux=None, filepath=None):
-        if not filepath is None:
-            self.filepath = filepath
-            self.wlt, self.flux = np.load(self.filepath)
+    def __init__(self, wlt=None, flux=None, file=None):
+        if not file is None:
+            read_file = np.load(file)
+            if len(read_file) > 2:
+                self.wlt, self.flux, self.cont = read_file
+            else:
+                self.wlt, self.flux = read_file
         else:
             self.wlt = wlt
             self.flux = flux
     @property
     def resolution(self):
         return np.round(np.median(self.wlt) / np.mean(np.diff(self.wlt)), 0)
+    
+    def get_spline(self):
+        self.cs = splrep(self.wlt, self.flux)
+        return self
+    
+    def blackbody(self, T, nu):
+        b = 2.*h*nu**3./c_cgs**2.
+        b /= (np.exp(h*nu/kB/T)-1.)
+        return b
+    
+    def scale_model(self, T_star=8000., transit_depth=0.01):
+        freq = c_cgs/(self.wlt*1e-8) # where wlt in AA
+        Fs = np.pi * self.blackbody(T_star, freq)
+        
+        # renaming to make it more readable
+        Fp, Cp = self.flux, self.cont
+        D = transit_depth
+        # scale and normalise the model
+        template = 1 + (D * Fp/Fs)
+        continuum = 1 + (D * Cp/Fs)
+        template /= continuum
+        self.flux = template
+        return self
+        
                    
             
     def plot(self, ax=None, mode='1D', fig=None, **kwargs):
@@ -59,11 +91,12 @@ class Template(Datacube):
             new_wave = self.new_wlt
             
         
-        cs = splrep(self.wlt*beta, self.flux)
-        if np.isnan(cs[1]).any():
-                gflux = interp1d(self.wlt*beta, self.flux, bounds_error=False, fill_value=0.0)(new_wave)
+        if np.isnan(self.cs[1]).any():
+            c_int = interp1d(self.wlt, self.flux, bounds_error=False, fill_value=0.0)
+            gflux = c_int(new_wave*beta)
+            
         else:
-            gflux = splev(new_wave, cs)
+            gflux = splev(new_wave*beta, self.cs)
             
         if return_self:
             self.wlt = new_wave
@@ -72,60 +105,47 @@ class Template(Datacube):
         else:
             return gflux
     
-    def crop(self, wave, eps=0.1):
-        span = wave.max() - wave.min()
-        mask = self.wlt < (wave.min()-(eps*span))
-        mask += self.wlt > (wave.max()+(eps*span))
+    def crop(self, wmin=None, wmax=None, wave=None, eps=0.1):
+        
+        wmin = wmin or wave.min()
+        wmax = wmax or wave.max()
+        span = wmax - wmin
+        
+        mask = self.wlt < (wmin-(eps*span))
+        mask += self.wlt > (wmax+(eps*span))
         self.wlt = self.wlt[~mask]
         self.flux = self.flux[~mask]
         return self
         
         
-    def shift_2D(self, RV, wave=None, num_cpus=6):
+    def shift_2D(self, RV, wave=None, num_cpus=0):
         
+        
+        self.get_spline()
+            
         c = const.c.to('km/s').value
-
         self.rv = RV
-        beta = 1 + (self.rv/c)
+        beta = 1 - (self.rv/c)
         
         temp = self.copy()
         if not wave is None: 
             temp.crop(wave)
             temp.new_wlt = wave
         
-        
-        # with mp.Pool(num_cpus) as p:
-        #         output = p.map(temp.interpolate, beta)
-        pool = ProcessPool(nodes=num_cpus)
-        output = pool.amap(temp.interpolate, beta).get()
-                
-        temp.gflux = np.array(output)
+    
+        if num_cpus>0:
+            pool = ProcessPool(nodes=num_cpus)
+            output = pool.amap(temp.interpolate, beta).get()
+            
+        else:
+            output = [temp.interpolate(beta[i]) for i in range(beta.size)]
+            
+        temp.gflux = np.array(output)   
         temp.wlt = temp.new_wlt
         temp_dc = Datacube(wlt=temp.new_wlt, flux=temp.gflux)
         temp_dc.rv = temp.rv
         return temp_dc
     
-    
-    def shift_2D_slow(self, RV, wave=None):
-        temp = self.copy()
-        c = const.c.to('km/s').value
-        self.rv = RV
-        beta = 1 - (self.rv/c)
-        
-        
-        if not wave is None: 
-            temp.wlt = wave
-        
-        temp.gflux = np.zeros((self.rv.size, temp.wlt.size))
-        # cs = splrep(wave_in*beta[j], self.flux)
-        for j in range(self.rv.size):
-            cs = splrep(self.wlt*beta[j], temp.flux)
-            if np.isnan(cs[1]).any():
-                temp.gflux[j,] = interp1d(self.wlt*beta[j], temp.flux, bounds_error=False,
-                                          fill_value=0.0)(temp.wlt)
-            else:
-                temp.gflux[j,] = splev(temp.wlt, cs)
-        return temp
     
     def load_TP(self):
         path = 'data/PT-two_point_profile.npy'
@@ -202,29 +222,6 @@ class Template(Datacube):
         self.flux /= y_continuum_fitted.value
         return self
     
-    # def convolve_instrument(self, res=50e3):
-    #     '''convolve to instrumental resolution with a Gaussian kernel'''
-    #     from astropy.convolution import Gaussian1DKernel, convolve
-        
-    #     cenwave = np.median(self.wlt)
-    #     # Create kernel
-    #     g = Gaussian1DKernel(stddev=0.5*cenwave/res) # set sigma = FWHM / 2. = lambda / R
-    #     self.flux = convolve(self.flux, g)
-    #     return self
-    
-    def resample(self, wave, mode='2D'):
-        
-        if mode == '1D':
-            cs = splrep(self.wlt, self.flux)
-            self.flux_res = splev(wave, cs)
-            
-        elif mode == '2D':
-            self.gflux_res = np.zeros((self.gflux.shape[0], wave.size))
-            for i in range(self.gflux.shape[0]):
-                cs = splrep(self.wlt, self.gflux[i,:])
-                self.gflux_res[i,:] = splev(wave, cs)
-        return self
-    
     def pyAstro_convolve(self, row=-1):
         from PyAstronomy import pyasl
         if row < 0:
@@ -276,3 +273,25 @@ class Template(Datacube):
         flux = np.tile(self.flux, N).reshape(N, *self.flux.shape)
         dc = Datacube(wlt=self.wlt, flux=flux)
         return dc
+    
+    
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        

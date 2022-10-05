@@ -5,6 +5,7 @@ from .planet import Planet
 from .read import read_harpsn, read_giano
 from .pipeline import Pipeline
 from .sysrem import SysRem
+from .plot import Plot
 
 
 import numpy as np

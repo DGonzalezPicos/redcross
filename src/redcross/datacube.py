@@ -126,7 +126,11 @@ class Datacube:
         d = np.load(path, allow_pickle=True).tolist()
         for key in d.keys():
             setattr(self, key, d[key])
-        self.get_header()
+        try:
+            self.get_header()
+        except:
+            # no header...
+            pass
         return self
     
     
@@ -139,19 +143,20 @@ class Datacube:
     
     def inject_signal(self, planet, template, RV=None, factor=1., ax=None):
         temp = template.copy()
+        p = planet.copy()
         
-        if factor > 0.: temp.boost(factor)
+        if factor > 1.: temp.boost(factor)
         
         # get 2D template shifted at given RV or at planet.RV if no RV vector is passed
         if RV is None:
-            RVt = planet.RV
+            RVt = p.RV
         else:
-            RVt = RV*np.ones_like(planet.RV)
+            RVt = RV*np.ones_like(p.RV)
 
         temp = temp.shift_2D(RVt, self.wlt)
         
         # inject only for out-of-eclipse frames
-        mask = self.mask_eclipse(planet, return_mask=True)
+        mask = p.mask_eclipse(return_mask=True)
         self.flux[~mask,:] *= temp.flux[~mask,:]
         
         if ax != None: self.imshow(ax=ax)
@@ -256,27 +261,26 @@ class Datacube:
         if ax != None: self.imshow(ax=ax)        
         return self
     
-    def airmass_detrend(self, log_space=False, ax=None):
+    def airmass_detrend(self, mode='divide', ax=None, save_model=False):
         '''Fit a second order polynomial to each column and divide(subtract) the fit 
         in linear(log) space'''
         nans = np.isnan(self.wlt)
+        airmass_model = np.ones_like(self.flux)
+
+        # Fit a 2nd order polynomial on each pixel channel (ignore masked columns i.e. NaNs)
+        for j in np.where(nans==False)[0]:
+            airmass_model[:,j] = np.poly1d(np.polyfit(self.airmass, self.flux[:,j], 2))(self.airmass)
+            
+        # SUBTRACT or DIVIDE airmass fit for every *non-NaN* channel    
+        self.flux[:,~nans] = getattr(np, mode)(self.flux[:,~nans], airmass_model[:,~nans])
         
-        if log_space:
-            for j in np.where(nans==False)[0]:
-                y = np.log(self.flux[:,j])
-                fit = np.poly1d(np.polyfit(self.airmass,y,2))(self.airmass)
-                self.flux[:,j] = np.exp(y - fit)
-        else:
-#            for j in range(self.nPix):
-            # for pix in np.argwhere(nans==False):
-            #     j = int(pix)
-            for j in np.where(nans==False)[0]:
-                y = self.flux[:,j]
-                fit = np.poly1d(np.polyfit(self.airmass,y,2))(self.airmass)
-                self.flux[:,j] /= fit
-                if not self.flux_err is None:
-                    self.flux_err[:,j] /= fit
+        # propagate on flux_err if we **divide** by the airmass model
+        if mode == 'divide':
+            if not self.flux_err is None:
+                self.flux_err[:,~nans] = getattr(np, mode)(self.flux_err[:,~nans], airmass_model[:,~nans])
+                
         if ax != None: self.imshow(ax=ax)
+        if save_model: self.airmass_model = airmass_model
         return self
             
     
@@ -378,43 +382,24 @@ class Datacube:
         if ax != None: self.imshow(ax=ax)
         return self
     
-    def mask_eclipse(self, planet_in, return_mask=False, 
+    def mask_eclipse(self, planet, return_mask=False, 
                      invert_mask=False, debug=False):
         '''given the planet PHASE and duration of eclipse `t_14` in days
         return the datacube with the frames masked'''
-        dc = self.copy()
-        planet = deepcopy(planet_in)
         shape_in = self.shape
-        phase = planet.phase
-        phase_14 = 0.5 * ((planet.T_14) % planet.P) / planet.P
-        
-        mask = np.abs(phase - 0.50) < phase_14 # frames IN-eclipse
-        if invert_mask:
-            mask = ~mask
-            
-        if return_mask:
-            return mask
-        
-        else:
-            if len(dc.shape) < 3:
-                dc.flux = self.flux[~mask,:]
-                if not dc.flux_err is None:
-                   dc.flux_err = self.flux_err[~mask,:]
-            else:
-                dc.flux = dc.flux[:,~mask,:]
-                if not dc.flux_err is None:
-                    dc.flux_err = dc.flux_err[:,~mask,:]
-          
-            if debug:
-                print('Original self.shape = {:}'.format(shape_in))
-                print('After ECLIPSE masking self.shape = {:}'.format(dc.shape))
+        dc = self.copy()
+        p = planet.copy()
+        mask = p.mask_eclipse(return_mask=True)
                             
-            dc.flux = dc.flux
+        dc.flux = dc.flux[~mask,:]
+        if hasattr(dc, 'airmass'):
             dc.airmass = dc.airmass[~mask]
-            if not dc.flux_err is None:
-                dc.flux_err = dc.flux_err
-
-            return dc
+        # if hasattr(dc, 'flux_err'):
+        #     dc.flux_err = dc.flux_err
+        if debug:
+            print('Original self.shape = {:}'.format(shape_in))
+            print('After ECLIPSE masking self.shape = {:}'.format(dc.shape))
+        return dc
     
     def split_orders(self, debug=True):
         '''last update: ago 21 2022
@@ -489,7 +474,8 @@ class Datacube:
     #     return self
 
         
-    def sysrem(self, n=6, mode='subtract', debug=False, ax=None, outdir=None):
+    def sysrem(self, n=6, mode='subtract', debug=False, ax=None, outdir=None,
+               save_model=False):
         '''new sysrem implementation (august 25th 2022)'''
         from .sysrem import SysRem
 #        dco = self.copy()
@@ -498,12 +484,39 @@ class Datacube:
         
         if mode == 'divide':
             self.flux[:, ~nans] /= (1. + sys.sysrem_model)
-            self.sysrem_model = sys.sysrem_model
         elif mode == 'subtract':
             self.flux[:, ~nans] = sys.r_ij
-       
+        
+        
+        if save_model: self.sysrem_model = sys.sysrem_model
         if ax != None: self.imshow(ax=ax)
         return self 
+    
+    def PCA(self, n, ax=None):
+        nans = np.isnan(self.wlt)
+        u, s, vh = np.linalg.svd(self.flux[:,~nans], full_matrices=False)
+        s1, s2 = (np.copy(s) for _ in range(2))
+        
+        # data_pro, noise = (self.copy() for _ in range(2))
+        data_pro, PCA_model = (self.flux.copy() for _ in range(2))
+        
+        # save the main PCs as the "processed data" in `data_pro`
+        s1[0:n] = 0.
+        W=np.diag(s1)
+        data_pro[:,~nans] = np.dot(u,np.dot(W,vh))
+
+        # we save the "discarded PCs" as `noise
+        s2[n:] = 0
+        W = np.diag(s2)
+        PCA_model[:,~nans] = np.dot(u, np.dot(W, vh))
+        
+        self.flux = data_pro
+        self.PCA_model = PCA_model
+        
+        
+        if ax != None: self.imshow(ax=ax)
+        return self
+        
     
     def reduce_orders(self, function, orders, num_cpus=4):
         from p_tqdm import p_map

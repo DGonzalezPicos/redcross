@@ -22,10 +22,7 @@ class Pipeline:
         dco = dc.order(order)
         if not ax is None: dco.imshow(ax=ax[0])
         
-        for i, fun in enumerate(self.steps):
-            if not ax is None: dco.imshow(ax=ax[i])
-            
-#            print('{:}. {:10}'.format(i+1, fun))
+        for i, fun in enumerate(self.steps):            
             if self.args[i] != None:
                 dco = getattr(dco, fun)(**self.args[i])
             else:
@@ -49,30 +46,24 @@ class Pipeline:
     def reduce_orders(self, dc, num_cpus=4):
         import multiprocessing as mp
         import tqdm
-#        from p_tqdm import p_map
-#        from pathos.pools import ProcessPool
-#        from joblib import Parallel, delayed
+        from pathos.pools import ProcessPool, ThreadPool
+        from joblib import Parallel, delayed
+
         orders = np.arange(0, dc.nOrders)
         self.dc = dc.copy() # make copy
-#        output = p_map(self.reduce, orders, num_cpus=num_cpus)
-#        pool = ProcessPool(nodes=4)
-#        output = pool.map(self.reduce, orders, num_cpus=num_cpus)
         
-        pool = mp.Pool(processes=4)
-        output = []
-        for result in tqdm.tqdm(pool.imap_unordered(self.reduce, orders), total=len(orders)):
-            output.append(result)
-        # return output
+        # pool = mp.Pool(processes=num_cpus)
+        # output = []
+        # for result in tqdm.tqdm(pool.imap_unordered(self.reduce, orders), total=len(orders)):
+        #     output.append(result)
+        # amap = ProcessPool(nodes=num_cpus).amap
+        # tmap = ThreadPool().map
+        # pool = ProcessPool(nodes=num_cpus)
+        # output = pool.amap(self.reduce, orders).get()
         
-#         print(output[0].shape)
-# #        output = Parallel(n_jobs=4, verbose=1)(delayed(self.reduce)(orders))        
-#         # self.dc.wlt = np.hstack([output[k].wlt for k in range(orders.size)])
-#         # self.dc.flux = np.hstack([output[k].flux for k in range(orders.size)])
-#         # self.dc.flux_err = np.hstack([output[k].flux_err for k in range(orders.size)])
+        output = Parallel(n_jobs=num_cpus)(delayed(self.reduce)(j) for j in orders)
+       
         [self.dc.update(output[k], k) for k in range(len(output))]
-#         print(self.dc.wlt.shape)
-#         self.dc.wlt = np.median(self.dc.wlt, axis=1)
-#         self.dc.sort_wave()
         return self.dc
     
     def set_sysrem(self, n):

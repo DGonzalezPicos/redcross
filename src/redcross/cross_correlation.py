@@ -7,6 +7,8 @@ import astropy.units as u
 from .datacube import Datacube
 from pathos.pools import ProcessPool
 
+c = 2.998e5 # km/s
+
 class CCF(Datacube):
     mode = 'ccf'
     def __init__(self, rv=None, template=None, flux=None, **kwargs):
@@ -42,20 +44,22 @@ class CCF(Datacube):
         if not hasattr(self, 'gTemp'):
             start = time.time()
             # print('Computing 2D template...')
-            temp2D = self.template.shift_2D(self.rv, dc.wlt)
+            temp2D = self.template.shift_2D(self.rv, dc.wlt[~nans])
             if hp_window > 0.:
                 temp2D.high_pass_gaussian(window=hp_window)
-            self.gTemp = temp2D.flux[:,~nans] # TESTING
-            self.gTemp -= np.nanmean(self.gTemp) 
+            self.gTemp = temp2D.flux
+            self.gTemp -= np.nanmean(self.gTemp, axis=0) 
             # print('Time to build 2D template = {:.2f} s'.format(time.time()-start))
 
         # dc.estimate_noise() # testing Sept 19th 2022
-        data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans])
+        data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans], axis=0)
+        
         
         # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
-        noise2 = np.var(dc.flux[:,~nans], axis=0)
+        noise2 = np.var(data, axis=0)
+        more_nans = np.isnan(noise2)
         # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
-        self.flux = np.dot(data/noise2, self.gTemp.T) 
+        self.flux = np.dot((data/noise2)[:,~more_nans], self.gTemp.T[~more_nans,:]) 
                     
         if debug:
             print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
@@ -116,7 +120,6 @@ class CCF(Datacube):
         self.flux = np.zeros_like(self.rv)
         wave, flux = self.template.wlt, self.template.flux
 
-        c = 2.998e5
         beta = 1 + (self.rv/c)
         for i in range(self.rv.size):
             fxt_i = interp1d(wave*beta[i], flux, fill_value="extrapolate")(wave)
@@ -152,10 +155,9 @@ class KpV:
         if snr = True, the returned values are SNR (background sub and normalised)
         else = map values'''
     
-             
+        ecl = False * np.ones_like(self.planet.RV)         
         if ignore_eclipse:   
-            self.ccf.mask_eclipse(self.planet)
-            self.planet.mask_eclipse(debug=False)
+            ecl = self.planet.mask_eclipse(return_mask=True)
             
         snr_map = np.zeros((len(self.kpVec), len(self.vrestVec)))
         rvel = ((self.planet.v_sys*u.km/u.s)-self.planet.BERV*u.km/u.s).value 
@@ -164,7 +166,8 @@ class KpV:
         for ikp in range(len(self.kpVec)):
             self.rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
             
-            for iObs in range(self.planet.RV.size):
+            # for iObs in range(self.planet.RV.size):
+            for iObs in np.where(ecl==False)[0]:
                 outRV = self.vrestVec + self.rv_planet[iObs]
                 snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
             # Attemp at parallelising with the function above (more work needed...)
