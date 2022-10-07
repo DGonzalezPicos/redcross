@@ -34,6 +34,7 @@ class Template(Datacube):
         return np.round(np.median(self.wlt) / np.mean(np.diff(self.wlt)), 0)
     
     def get_spline(self):
+        self.sort()
         self.cs = splrep(self.wlt, self.flux)
         return self
     
@@ -105,12 +106,27 @@ class Template(Datacube):
         else:
             return gflux
     
-    def crop(self, wmin=None, wmax=None, wave=None, eps=0.1):
-        
-        wmin = wmin or wave.min()
-        wmax = wmax or wave.max()
+    def crop(self, wmin, wmax, eps=0.1):
+        '''
+        Crop template in wavelength. The `eps` argument extends the range to avoid
+        potential interpolation issues.
+
+        Parameters
+        ----------
+        wmin : float
+            minimum wavelength The default is None.
+        wmax : float
+            maximum wavelength. The default is None.
+        eps : float, optional
+            Add (eps*100)% to both edges. The default is 0.1.
+
+        Returns
+        -------
+        TYPE
+            template.
+
+        '''
         span = wmax - wmin
-        
         mask = self.wlt < (wmin-(eps*span))
         mask += self.wlt > (wmax+(eps*span))
         self.wlt = self.wlt[~mask]
@@ -119,8 +135,7 @@ class Template(Datacube):
         
         
     def shift_2D(self, RV, wave=None, num_cpus=0):
-        
-        
+        # compute the spline coefficients once (and store them)
         self.get_spline()
             
         c = const.c.to('km/s').value
@@ -129,7 +144,7 @@ class Template(Datacube):
         
         temp = self.copy()
         if not wave is None: 
-            temp.crop(wave)
+            temp.crop(np.nanmin(wave), np.nanmax(wave))
             temp.new_wlt = wave
         
     
@@ -273,6 +288,26 @@ class Template(Datacube):
         flux = np.tile(self.flux, N).reshape(N, *self.flux.shape)
         dc = Datacube(wlt=self.wlt, flux=flux)
         return dc
+    
+    def merge(self, templates=[], eps=0.1):
+        
+        wave, flux = ([] for _ in range(2))
+        for t in templates:
+            wave.append(t.wlt)
+            flux.append(t.flux-1.) # add Fp_i/Fs (need to subtract 1 from **1+Fp_i/Fs**)
+            
+        wave, flux = np.array(wave), np.array(flux)
+        
+        # check if they have the same wavelength grid (`eps` is the threshold parameter)
+        diff = np.diff(np.median(wave, axis=1))
+        if np.any(diff > eps):
+            print('Unable to merge templates with different wavelength grids...')
+        else:
+            self.wlt = np.median(wave, axis=0)
+            self.flux = np.sum(flux, axis=0)
+            return self
+        
+
     
     
 

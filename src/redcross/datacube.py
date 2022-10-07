@@ -162,6 +162,25 @@ class Datacube:
         if ax != None: self.imshow(ax=ax)
         return self
     
+    def band(self, b):
+        '''similar to `order()` but with a set of predefined orders for each
+        band. Customised to GIANO.'''
+        bands = {
+            'J': [3,4,5,6,7,8,9,10, 15,16,17,18,19,20,21,22,23],
+            'H': np.arange(29, 39),
+            'K': np.arange(42, 50)}
+        
+        if len(b) > 1: # more than one band
+             [bands[x] for x in b]
+             orders = np.concatenate([bands[x] for x in b])
+        else:
+            orders = bands[b]
+            
+        # Now call `order` on the corresponding orders   
+        dco = self.order(orders)
+        return dco
+        
+    
     
     def order(self, o):
         dco = self.copy()
@@ -421,6 +440,26 @@ class Datacube:
         dc.flux = np.concatenate([dc.flux[:,:,x:], dc.flux[:,:,:x]])[sort,:,:]
         if not dc.flux_err is None:
             dc.flux_err = np.concatenate([dc.flux_err[:,:,x:], dc.flux_err[:,:,:x]])[sort,:,:]
+        
+        if debug:
+            print(self.shape)
+            print(dc.shape)
+        return dc
+    
+    def rebuild_orders(self, debug=False):
+        '''inverse operation to `split_orders()` '''
+        dc = self.copy()
+        
+        wave = np.zeros((int(self.nOrders/2.), int(2*self.nPix)))
+        flux = np.zeros((int(self.nOrders/2.), self.nObs, int(2*self.nPix)))
+        # flux_err = np.zeros_like(flux)
+        
+        for j,i in enumerate(np.arange(0, dc.nOrders-1, 2)):
+            wave[j,] = dc.wlt[i:i+2].flatten()
+            flux[j,] = np.hstack(dc.flux[i:i+2,:,:])
+        dc.wlt = wave
+        dc.flux = flux
+        
         
         if debug:
             print(self.shape)
