@@ -47,55 +47,100 @@ class CCF(Datacube):
         self.gTemp -= np.nanmean(self.gTemp, axis=0) 
         return self
     
-    def cross_correlation(self, order=None):
-        if order is not None:
-            wave = self.dc.wlt[order,:]
-            flux = self.dc.flux[order,:,:]
-        else:
-            wave = self.dc.wlt
-            flux = self.dc.flux
+    def cross_correlation(self, o):
+        # if order is not None:
+        #     wave = self.dc.wlt[order,:]
+        #     flux = self.dc.flux[order,:,:]
+        # else:
+        #     wave = self.dc.wlt
+        #     flux = self.dc.flux
+        
+        dco = self.dc.order(o)
+        nans = np.isnan(dco.wlt)
+        wave, flux = dco.wlt[~nans], dco.flux[:,~nans]
             
-        nans = np.isnan(wave)
-        self.__prepare_template(wave[~nans])
-        data = flux[:,~nans] - np.nanmean(flux[:,~nans], axis=0)
+        
+        # self.__prepare_template(wave[~nans]) # OLD WAY OF DOING CCF (actually slower)
+        
         
         # the data is weighted by the variance of each pixel channel (sigma^2)
-        # noise2 = np.var(data, axis=0)
-        ccf_i = np.dot((data/np.var(data, axis=0)), self.gTemp.T) 
+        data = flux - np.nanmean(flux, axis=0)
+        f = data / np.var(data, axis=0)
+        
+        temp = self.template.copy().crop(np.min(wave), np.max(wave), eps=0.30).sort()
+        temp.flux -= np.mean(temp.flux)
+        # cs = splrep(temp.wlt, temp.flux)
+        # print(cs)
+        
+        # shifts
+        beta = 1 - (self.rv/c)
+        # build 2D template (for every RV-shift)
+        # g = np.array([splev(wave*beta[j], cs) for j in range(beta.size)])
+        g = np.array([interp1d(temp.wlt, temp.flux)(wave*beta[j]) for j in range(beta.size)])
+            
+        ccf_i = np.dot(f, g.T)
+            
         return ccf_i
-   
-    def run(self, dc, debug=False, ax=None):
+    
+    def run(self, dc):
         self.frame = dc.frame
         start=time.time()
-        self.dc = dc.copy()        
-        # check if data has a HPG filter applied
-        # if True, apply the same filter to the template after resampling (window in pixels)
-        if hasattr(dc, 'reduction'):
-            if 'high_pass_gaussian' in dc.reduction:
-                self.window = dc.reduction['high_pass_gaussian']['window']
-                
+        
+        self.dc = dc.copy()
+        self.flux = np.zeros((dc.nObs, self.rv.size))
+        
+        
         if len(dc.shape) > 2:
-            # from p_tqdm import p_map
             orders = np.arange(0, dc.nOrders)
-            pool = ProcessPool(nodes=self.num_cpus)
-            ccf_i = np.array(pool.amap(self.cross_correlation, orders).get())
-            # ccf_i = np.array(p_map(self.cross_correlation, orders, num_cpus=6))
-            self.flux = np.sum(ccf_i, axis=0)
-        else:
-            # check whether the 2D template needs to be computed
-            # this avoids recomputing when changing the data input for the same template
-            nans = np.isnan(dc.wlt)
-            if not hasattr(self, 'gTemp'):
-                self.__prepare_template(dc.wlt[~nans])
-    
-            self.flux = self.cross_correlation()
-                    
-        if debug:
-            print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
-            print('CCF shape = {:}'.format(self.shape))
+
+            if self.num_cpus > 0:
+                pool = ProcessPool(nodes=self.num_cpus)
+                output = np.array(pool.amap(self.cross_correlation, orders).get())
+                self.flux = np.sum(output, axis=0)
+                
+            else:
+                self.flux = sum([self.cross_correlation(dc.order(o)) for o in orders])
+                
             
-        if ax != None: self.imshow(ax=ax)
+        else:
+            self.flux = self.cross_correlation(dc)
+            
+        delattr(self, 'dc') # avoid overloading memory
+        print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
         return self
+   
+    # def run(self, dc, debug=False, ax=None):
+    #     self.frame = dc.frame
+    #     start=time.time()
+    #     self.dc = dc.copy()        
+    #     # check if data has a HPG filter applied
+    #     # if True, apply the same filter to the template after resampling (window in pixels)
+    #     if hasattr(dc, 'reduction'):
+    #         if 'high_pass_gaussian' in dc.reduction:
+    #             self.window = dc.reduction['high_pass_gaussian']['window']
+                
+    #     if len(dc.shape) > 2:
+    #         # from p_tqdm import p_map
+    #         orders = np.arange(0, dc.nOrders)
+    #         pool = ProcessPool(nodes=self.num_cpus)
+    #         ccf_i = np.array(pool.amap(self.cross_correlation, orders).get())
+    #         # ccf_i = np.array(p_map(self.cross_correlation, orders, num_cpus=6))
+    #         self.flux = np.sum(ccf_i, axis=0)
+    #     else:
+    #         # check whether the 2D template needs to be computed
+    #         # this avoids recomputing when changing the data input for the same template
+    #         nans = np.isnan(dc.wlt)
+    #         if not hasattr(self, 'gTemp'):
+    #             self.__prepare_template(dc.wlt[~nans])
+    
+    #         self.flux = self.cross_correlation()
+                    
+    #     if debug:
+    #         print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
+    #         print('CCF shape = {:}'.format(self.shape))
+            
+    #     if ax != None: self.imshow(ax=ax)
+    #     return self
     
     
     def interpolate_to_planet(self, i):

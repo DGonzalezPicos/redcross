@@ -60,14 +60,14 @@ class Plot:
                     # Kp-DeltaV maps #
 # =============================================================================
     
-    def __plot_night(self, kpv_list, ax, title=None):
+    def __plot_night(self, ax, title=None):
         '''plot a single night (as a column) of GIANO kpv maps (for pos A and B)'''
         
      # plot each night
-        [kpv_list[i].plot(ax=ax[i], **self.args) for i in range(2)]
+        [self.kpv_list[i].plot(ax=ax[i], **self.args) for i in range(2)]
         
         # plot merged
-        kpv_12 = self.kpv.merge_kpvs(kpv_list)
+        kpv_12 = self.kpv.merge_kpvs(self.kpv_list)
         obj = kpv_12.plot(ax=ax[2], label='Both nights', **self.args) 
         print('---Peak at ({:.1f}, {:.1f}) km/s with SNR = {:.1f}---'.format(*kpv_12.snr_max()))
         kpv_12.plot_1D(ax=ax[3], **self.args)
@@ -79,42 +79,68 @@ class Plot:
             
         return obj
     
-    def kpv_maps(self, kpv_list, vmin=None, vmax=None, peak=None, outname=None, title=None):
+    def kpv_maps(self, kpv_list, instrument='HARPSN', vmin=None, vmax=None, peak=None, 
+                 outname=None, title=None):
         
         self.kpv = kpv_list[0]
         self.kpv_list = kpv_list
-        cols = int(len(kpv_list) / 2) 
-        if cols > 1: # GIANO mode
-            kpv_A = self.kpv.merge_kpvs([kpv_list[0], kpv_list[2]])
-            kpv_B = self.kpv.merge_kpvs([kpv_list[1], kpv_list[3]])
-            self.kpv_list = np.append(self.kpv_list, [kpv_A, kpv_B])
-            cols+=1
-        
-        fig, ax = plt.subplots(4, cols,figsize=(4*cols,12))
-        # fig.subplots_adjust(hspace=0.15)
-        # self.labels = ['1','2','1+2']
-        self.labels = ['A','B','AB']
         
         vmin = vmin or -4
         vmax = vmax or 8.
         peak = peak or (0.8, 194.7)
         
         self.args = {'vmin':vmin, 'vmax':vmax, 'peak':peak}
-        # _ = [axe.legend(loc='lower right', frameon=True, fontsize=9) for axe in ax.flatten()]
-        # plot each night
-        # [kpv_list[i].plot(ax=ax[i], v_range=[vmin, vmax], peak=self.peak) for i in range(2)]
+    
+        if instrument == 'GIANO':
+            cols = int(len(kpv_list) / 2) 
+            if cols > 1: # GIANO mode
+                kpv_A = self.kpv.merge_kpvs([kpv_list[0], kpv_list[2]])
+                kpv_B = self.kpv.merge_kpvs([kpv_list[1], kpv_list[3]])
+                self.kpv_list = np.append(self.kpv_list, [kpv_A, kpv_B])
+                cols+=1
+            
+            fig, ax = plt.subplots(4, cols,figsize=(4*cols,12))
+            # fig.subplots_adjust(hspace=0.15)
+            # self.labels = ['1','2','1+2']
+            self.labels = ['A','B','AB']
+            
+
+            # _ = [axe.legend(loc='lower right', frameon=True, fontsize=9) for axe in ax.flatten()]
+            # plot each night
+            # [kpv_list[i].plot(ax=ax[i], v_range=[vmin, vmax], peak=self.peak) for i in range(2)]
+            
+            # # plot merged
+            # kpv_12 = self.kpv.merge_kpvs(kpv_list)
+            # obj = kpv_12.plot(ax=ax[2], v_range=[vmin, vmax], peak=self.peak, label='Both nights') 
+            # print('---Peak at ({:.1f}, {:.1f}) km/s with SNR = {:.1f}---'.format(*kpv_12.snr_max()))
+            
+           
+            # kpv_12.plot_1D(ax=ax[3], peak=self.peak, v_range=(vmin, vmax))
+                  
+            titles = ['Night 1', 'Night 2', 'Night 1+2']
+            for i,j in enumerate(range(0,cols+2,2)):
+                obj = self.__plot_night(self.kpv_list[j:j+2], ax[:,i], title=titles[i])
+                
+            # remove labels from yaxis
+            [axe.set(xticks=[], xlabel='', ylabel='') for axe in ax[:,1:].flatten()]
         
-        # # plot merged
-        # kpv_12 = self.kpv.merge_kpvs(kpv_list)
-        # obj = kpv_12.plot(ax=ax[2], v_range=[vmin, vmax], peak=self.peak, label='Both nights') 
-        # print('---Peak at ({:.1f}, {:.1f}) km/s with SNR = {:.1f}---'.format(*kpv_12.snr_max()))
         
-       
-        # kpv_12.plot_1D(ax=ax[3], peak=self.peak, v_range=(vmin, vmax))
-              
-        titles = ['Night 1', 'Night 2', 'Night 1+2']
-        for i,j in enumerate(range(0,cols+2,2)):
-            obj = self.__plot_night(self.kpv_list[j:j+2], ax[:,i], title=titles[i])
+        elif instrument == 'HARPSN':
+             fig, ax = plt.subplots(4,figsize=(5,12))
+             labels = ['1','2','12']
+            
+             args = {'vmin':-4., 'vmax':8., 'peak':peak}
+
+             [kpv_list[i].plot(ax=ax[i], **args) for i in range(2)]
+             kpv_12 = kpv_list[0].merge_kpvs(kpv_list)
+             obj = kpv_12.plot(ax=ax[2], label='Both nights', **args) 
+             kpv_12.plot_1D(ax=ax[3], **args)
+             
+             for k in range(3):
+                ax[k].text(s=labels[k], x=0.05, y=0.85, color='white', fontsize=19, transform=ax[k].transAxes)
+                ax[k].set(xticks=[], xlabel='')
+                ax[k].legend()
+             if title is not None: ax[0].set_title(title)
         
         fig.subplots_adjust(right=0.8, hspace=0.03)
         # cbar_ax = fig.add_axes([0.85, 0.40, 0.04, 0.4])
@@ -122,8 +148,7 @@ class Plot:
         fig.colorbar(obj, cax=cbar_ax)   
         # if title is not None:
         #     ax[0].set_title(title) 
-        # remove labels from yaxis
-        [axe.set(xticks=[], xlabel='', ylabel='') for axe in ax[:,1:].flatten()]
+
 
         
         # plt.show()

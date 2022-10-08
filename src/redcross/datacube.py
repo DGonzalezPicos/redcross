@@ -18,7 +18,8 @@ class Datacube:
     def __init__(self, flux=None, wlt=None, flux_err=None, night=None,**header):
         self.flux = flux
         self.wlt = wlt
-        self.flux_err = flux_err
+        if flux_err is not None:    
+            self.flux_err = flux_err
         self.night = night
         for key in header:
             setattr(self, key, header[key])
@@ -110,7 +111,7 @@ class Datacube:
         xStDev = np.nanstd(self.flux, axis=0)
         yStDev = np.nanstd(self.flux, axis=1)
         # my estimate method
-        self.flux_err = (0.5*(yStDev[:,np.newaxis] + xStDev[np.newaxis,:]))
+        # self.flux_err = (0.5*(yStDev[:,np.newaxis] + xStDev[np.newaxis,:]))
         # as in Nugroho+2021
         self.flux_err = np.outer(yStDev, xStDev)/ np.nanstd(self.flux)
         return self
@@ -158,6 +159,8 @@ class Datacube:
         # inject only for out-of-eclipse frames
         mask = p.mask_eclipse(return_mask=True)
         self.flux[~mask,:] *= temp.flux[~mask,:]
+        if hasattr(self, 'flux_err'):
+            self.flux_err[~mask,:] *= temp.flux[~mask,:]
         
         if ax != None: self.imshow(ax=ax)
         return self
@@ -188,7 +191,7 @@ class Datacube:
         if type(o) in [list, np.ndarray]:
                 dco.wlt = dco.wlt[o[0]:o[-1]+1,]
                 dco.flux = dco.flux[o[0]:o[-1]+1,]
-                if not dco.flux_err is None:
+                if hasattr(dco, 'flux_err'):
                     dco.flux_err = dco.flux_err[o[0]:o[-1]+1,]
     
         else:
@@ -198,7 +201,7 @@ class Datacube:
                 dco.wlt = dco.wlt[o,:]
             dco.flux = dco.flux[o,:,:]
             # dco.order = orders
-            if not dco.flux_err is None:
+            if hasattr(dco, 'flux_err'):
                 dco.flux_err = dco.flux_err[o,:,:]
         dco.o = o # store order number
         return dco
@@ -206,7 +209,7 @@ class Datacube:
     
     def normalise(self, ax=None):
        self.flux = (self.flux.T / np.nanmedian(self.flux, axis=1)).T
-       if not self.flux_err is None:
+       if hasattr(self, 'flux_err'):
            self.flux_err = (self.flux_err.T / np.nanmedian(self.flux, axis=1)).T
            
        if ax != None: self.imshow(ax=ax)
@@ -233,7 +236,7 @@ class Datacube:
                 mask = np.abs(flux[:,x]-mean) > sigma*std
                 self.flux[mask,x] = mean
                 # self.flux[mask, x] = np.nan
-                if not self.flux_err is None:
+                if hasattr(self, 'flux_err'):
                     self.flux_err[mask,x] = np.nanmean(self.flux_err[:,x])
                     # self.flux_err[mask,x] = np.nan
                 outliers += mask[mask==True].size
@@ -243,7 +246,7 @@ class Datacube:
                 mean, std = np.nanmean(flux[i,:]), np.nanstd(flux[i,])
                 mask = (np.abs(flux[i,:]-mean) / std) > sigma
                 self.flux[i,mask] = np.nanmedian(flux)
-                if not self.flux_err is None:
+                if hasattr(self, 'flux_err'):
                     self.flux_err[i,mask] = np.nanmedian(self.flux_err[i,:])
                 outliers += mask[mask==True].size
             
@@ -269,7 +272,7 @@ class Datacube:
                 model = np.poly1d(np.polyfit(wave[~nans], self.flux[f,~nans], deg))
                 continuum = model(wave[~nans])
                 self.flux[f,~nans] /= continuum
-                if not self.flux_err is None:
+                if hasattr(self, 'flux_err'):
                     self.flux_err[f,~nans] /= continuum
         else:
             master = np.nanmedian(self.flux, axis=0) 
@@ -295,7 +298,7 @@ class Datacube:
         
         # propagate on flux_err if we **divide** by the airmass model
         if mode == 'divide':
-            if not self.flux_err is None:
+            if hasattr(self, 'flux_err'):
                 self.flux_err[:,~nans] = getattr(np, mode)(self.flux_err[:,~nans], airmass_model[:,~nans])
                 
         if ax != None: self.imshow(ax=ax)
@@ -343,7 +346,7 @@ class Datacube:
             if frac_masked < 10.:
                 self.wlt[mask] = np.nan
                 self.flux[:,mask] = np.nan
-                if not self.flux_err is None:
+                if hasattr(self, 'flux_err'):
                     self.flux_err[:,mask] = np.nan 
                 
                 k += 1 # good job! go to next iteration
@@ -367,7 +370,7 @@ class Datacube:
         mask = master < sat
         self.wlt[mask] = np.nan
         self.flux[:,mask] = np.nan
-        if not self.flux_err is None:
+        if hasattr(self, 'flux_err'):
             self.flux_err[:,mask] = np.nan
         
         if debug: print('Masked fraction = {:.2f} %'.format(self.nan_frac*100))
@@ -393,7 +396,7 @@ class Datacube:
         lowpass = ndimage.gaussian_filter(self.flux[:,~nans], [0, window])
         if mode=='divide':
             self.flux[:,~nans] /= lowpass
-            if not self.flux_err is None:
+            if hasattr(self, 'flux_err'):
                 self.flux_err[:,~nans] /= lowpass
         elif mode=='subtract':
             self.flux[:,~nans] -= lowpass
@@ -438,7 +441,7 @@ class Datacube:
         dc.wlt = dc.wlt[sort,:]
         
         dc.flux = np.concatenate([dc.flux[:,:,x:], dc.flux[:,:,:x]])[sort,:,:]
-        if not dc.flux_err is None:
+        if hasattr(dc, 'flux_err'):
             dc.flux_err = np.concatenate([dc.flux_err[:,:,x:], dc.flux_err[:,:,:x]])[sort,:,:]
         
         if debug:
@@ -588,7 +591,7 @@ class Datacube:
             self.wlt = self.wlt[:,~mask,:]
         
         self.flux = self.flux[:,~mask,:]
-        if not self.flux_err is None:
+        if hasattr(self, 'flux_err'):
             self.flux_err = self.flux_err[:,~mask,:]
             
         # Update planet header with the MASKED vectors
@@ -606,17 +609,17 @@ class Datacube:
         and the order number'''
         self.wlt[order,:] = dco.wlt
         self.flux[order,:,:] = dco.flux
-        if not dco.flux_err is None:
-            if self.flux_err is None:
-                self.flux_err = np.ones_like(self.flux)
-            self.flux_err[order,:,:] = dco.flux_err
+        
+        # if hasattr(self, 'flux_err'):
+        #     self.flux_err[order,:,:] = dco.flux_err
+       
         return self
     
     def merge_orders(self):
         '''merge data from different orders before computing CCF'''
         dc = self.copy()
         keys = ['wlt','flux']
-        if not dc.flux_err is None: keys.append('flux_err')
+        if hasattr(dc, 'flux_err'): keys.append('flux_err')
         for key in keys:
             setattr(dc, key, np.hstack(getattr(self, key)))
         return dc

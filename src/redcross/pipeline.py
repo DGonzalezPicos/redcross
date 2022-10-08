@@ -57,14 +57,20 @@ class Pipeline:
         
         num_cpus = num_cpus or self.num_cpus
 
-        orders = np.arange(0, dc.nOrders)
+        orders = np.arange(0, dc.nOrders, dtype=int)
         self.dc = dc.copy() # make copy
         
-        # run parallel function over all orders
-        output = p_map(self.reduce, orders, num_cpus=num_cpus)
+        print('Num cpus {:}'.format(num_cpus))
+        if num_cpus > 0:
+            # run parallel function over all orders
+            # save results in the same shape as input datacube
+            output = p_map(self.reduce, orders, num_cpus=num_cpus)
+            [self.dc.update(output[k], k) for k in range(len(output))]
+        else:
+            # no parallelisation
+            [self.dc.update(self.reduce(o), o) for o in orders]
+            
         
-        # save results in the same shape as input datacube
-        [self.dc.update(output[k], k) for k in range(len(output))]
         self.dc.reduction = self.info
         return self.dc
     
