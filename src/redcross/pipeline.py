@@ -12,9 +12,18 @@ class Pipeline:
         self.steps = steps or []
         self.args = ([None for _ in range(len(self.steps))]) or []
         
+        
+        self.num_cpus = 6 # by default
+        
     def add(self, step, args=None):
         self.steps.append(step)
         self.args.append(args)
+        return self
+    
+    @property
+    def info(self):
+        d = {k:v for k,v in zip(self.steps, self.args)}
+        return d
         
     def reduce(self, order, dc=None, ax=None):
 #        print('Reducing order...')
@@ -43,27 +52,20 @@ class Pipeline:
             
         return dco
     
-    def reduce_orders(self, dc, num_cpus=4):
-        import multiprocessing as mp
-        import tqdm
-        from pathos.pools import ProcessPool, ThreadPool
-        from joblib import Parallel, delayed
+    def reduce_orders(self, dc, num_cpus=None):
+        from p_tqdm import p_map
+        
+        num_cpus = num_cpus or self.num_cpus
 
         orders = np.arange(0, dc.nOrders)
         self.dc = dc.copy() # make copy
         
-        # pool = mp.Pool(processes=num_cpus)
-        # output = []
-        # for result in tqdm.tqdm(pool.imap_unordered(self.reduce, orders), total=len(orders)):
-        #     output.append(result)
-        # amap = ProcessPool(nodes=num_cpus).amap
-        # tmap = ThreadPool().map
-        # pool = ProcessPool(nodes=num_cpus)
-        # output = pool.amap(self.reduce, orders).get()
+        # run parallel function over all orders
+        output = p_map(self.reduce, orders, num_cpus=num_cpus)
         
-        output = Parallel(n_jobs=num_cpus)(delayed(self.reduce)(j) for j in orders)
-       
+        # save results in the same shape as input datacube
         [self.dc.update(output[k], k) for k in range(len(output))]
+        self.dc.reduction = self.info
         return self.dc
     
     def set_sysrem(self, n):
@@ -76,3 +78,11 @@ class Pipeline:
         sys_ind = int(np.argwhere(np.array(self.steps)=='sysrem'))
         return int(self.args[sys_ind]['n'])
 
+
+    
+    
+    
+    
+    
+    
+    

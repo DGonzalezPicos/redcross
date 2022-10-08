@@ -17,6 +17,9 @@ class CCF(Datacube):
         self.template = template
         self.flux = flux
         
+        
+        self.window = 0. # high pass gaussian to apply to the template before CCF.run()
+        self.num_cpus = 6 # by default
     def normalise(self):
         self.flux = self.flux / np.median(self.flux, axis=0)
         return self  
@@ -33,33 +36,59 @@ class CCF(Datacube):
         ccf_1d = np.median(self.flux, axis=0)
         ccf_1d -= np.median(bkg)
         return ccf_1d / np.std(bkg)
-
+    
+    def __prepare_template(self, wave):
+        # start = time.time()
+        # print('Computing 2D template...')
+        temp2D = self.template.shift_2D(self.rv, wave)
+        if self.window > 0.:
+            temp2D.high_pass_gaussian(window=self.window)
+        self.gTemp = temp2D.flux
+        self.gTemp -= np.nanmean(self.gTemp, axis=0) 
+        return self
+    
+    def cross_correlation(self, order=None):
+        if order is not None:
+            wave = self.dc.wlt[order,:]
+            flux = self.dc.flux[order,:,:]
+        else:
+            wave = self.dc.wlt
+            flux = self.dc.flux
+            
+        nans = np.isnan(wave)
+        self.__prepare_template(wave[~nans])
+        data = flux[:,~nans] - np.nanmean(flux[:,~nans], axis=0)
+        
+        # the data is weighted by the variance of each pixel channel (sigma^2)
+        # noise2 = np.var(data, axis=0)
+        ccf_i = np.dot((data/np.var(data, axis=0)), self.gTemp.T) 
+        return ccf_i
    
-    def run(self, dc, debug=False, hp_window=0., ax=None):
+    def run(self, dc, debug=False, ax=None):
         self.frame = dc.frame
         start=time.time()
-        nans = np.isnan(dc.wlt)
-        self.flux = np.zeros((dc.nObs,len(self.rv)))    
-        
-        if not hasattr(self, 'gTemp'):
-            start = time.time()
-            # print('Computing 2D template...')
-            temp2D = self.template.shift_2D(self.rv, dc.wlt[~nans])
-            if hp_window > 0.:
-                temp2D.high_pass_gaussian(window=hp_window)
-            self.gTemp = temp2D.flux
-            self.gTemp -= np.nanmean(self.gTemp, axis=0) 
-            # print('Time to build 2D template = {:.2f} s'.format(time.time()-start))
-
-        # dc.estimate_noise() # testing Sept 19th 2022
-        data = dc.flux[:,~nans]-np.nanmean(dc.flux[:,~nans], axis=0)
-        
-        
-        # noise2 = np.power(np.std(dc.flux[:,~nans], axis=0),2)
-        noise2 = np.var(data, axis=0)
-        more_nans = np.isnan(noise2)
-        # noise2 = np.power(dc.flux_err[:,~nans], 2) # testing Sept 19th 2022
-        self.flux = np.dot((data/noise2)[:,~more_nans], self.gTemp.T[~more_nans,:]) 
+        self.dc = dc.copy()        
+        # check if data has a HPG filter applied
+        # if True, apply the same filter to the template after resampling (window in pixels)
+        if hasattr(dc, 'reduction'):
+            if 'high_pass_gaussian' in dc.reduction:
+                self.window = dc.reduction['high_pass_gaussian']['window']
+                
+        if len(dc.shape) > 2:
+            # from p_tqdm import p_map
+            orders = np.arange(0, dc.nOrders)
+            pool = ProcessPool(nodes=self.num_cpus)
+            ccf_i = np.array(pool.amap(self.cross_correlation, orders).get())
+            # ccf_i = np.array(p_map(self.cross_correlation, orders, num_cpus=6))
+            self.flux = np.sum(ccf_i, axis=0)
+        else:
+            # check whether the 2D template needs to be computed
+            # this avoids recomputing when changing the data input for the same template
+            nans = np.isnan(dc.wlt)
+            if not hasattr(self, 'gTemp'):
+                self.__prepare_template(dc.wlt[~nans])
+    
+            self.flux = self.cross_correlation()
                     
         if debug:
             print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
@@ -150,7 +179,7 @@ class KpV:
         outRV = self.vrestVec + self.rv_planet[iObs]
         return interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV)    
         
-    def run(self, snr=True, ignore_eclipse=False, ax=None):
+    def run(self, snr=True, ignore_eclipse=True, ax=None):
         '''Generate a Kp-Vsys map
         if snr = True, the returned values are SNR (background sub and normalised)
         else = map values'''
@@ -170,11 +199,6 @@ class KpV:
             for iObs in np.where(ecl==False)[0]:
                 outRV = self.vrestVec + self.rv_planet[iObs]
                 snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
-            # Attemp at parallelising with the function above (more work needed...)
-            # with mp.Pool(self.num_cpus) as p:
-            #     snr_map_i = p.map(self.shift_vsys, np.arange(self.planet.RV.size))
-                
-            # snr_map[ikp,] = sum(snr_map_i)
             
         if snr:
             noise_map = np.std(snr_map[:,np.abs(self.vrestVec)>self.bkg])
@@ -245,15 +269,11 @@ class KpV:
             print('Max SNR = {:3.1f}'.format(self.bestSNR))
         return(bestVr, bestKp, self.bestSNR)
     
-    def plot(self, fig=None, ax=None, peak=None, v_range=None, label=''):
+    def plot(self, fig=None, ax=None, peak=None, vmin=None, vmax=None, label=''):
         lims = [self.vrestVec[0],self.vrestVec[-1],self.kpVec[0],self.kpVec[-1]]
-        if v_range is not None:
-            vmin = v_range[0]
-            vmax = v_range[1]
-        else:
-            vmin = self.snr.min()
-            vmax = self.snr.max()
-            
+        vmin = vmin or self.snr.min()
+        vmax = vmax or self.snr.max()
+
         ax = ax or plt.gca()
         obj = ax.imshow(self.snr,origin='lower',extent=lims,aspect='auto', 
                         cmap='inferno',vmin=vmin,vmax=vmax, label=label)
@@ -261,8 +281,7 @@ class KpV:
         ax.set_xlabel('Rest-frame velocity (km/s)')
         ax.set_ylabel('Kp (km/s)')
 
-        
-        
+
         peak = peak or self.snr_max()
         
         indv = np.abs(self.vrestVec - peak[0]).argmin()
@@ -365,14 +384,16 @@ class KpV:
             setattr(self, key, d[key])
         return self 
     
-    def plot_1D(self, peak, ax, v_range=None, label=None, return_data=False, **kwargs):
-        # ind_vsys0 = np.abs(self.vrestVec - peak[0]).argmin()
+    def plot_1D(self, peak, ax, vmin=None, vmax=None, label=None, return_data=False, **kwargs):
+        
+        vmin = vmin or self.snr.min()
+        vmax = vmax or self.snr.max()
         ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
         # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
         label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
         ax.plot(self.vrestVec, self.snr[ind_kp0,:], label=label, **kwargs)
-        ax.set(xlabel='$\Delta V_{{sys}}$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
-        if not v_range is None: ax.set_ylim(v_range)
+        ax.set(xlabel='$\Delta v}$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
+        ax.set_ylim((vmin, vmax))
         ax.legend(frameon=False, loc='upper right')
         if return_data:
             return self.snr[ind_kp0,:]
