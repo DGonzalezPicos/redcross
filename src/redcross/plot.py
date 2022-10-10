@@ -123,13 +123,15 @@ class Plot:
                 
             # remove labels from yaxis
             [axe.set(xticks=[], xlabel='', ylabel='') for axe in ax[:,1:].flatten()]
+            cbar_ax = fig.add_axes([0.81, 0.40, 0.020, 0.4])
+
         
         
         elif instrument == 'HARPSN':
              fig, ax = plt.subplots(4,figsize=(5,12))
-             labels = ['1','2','12']
+             labels = ['1','2','1+2']
             
-             args = {'vmin':-4., 'vmax':8., 'peak':peak}
+             args = {'vmin':vmin, 'vmax':vmax, 'peak':peak}
 
              [kpv_list[i].plot(ax=ax[i], **args) for i in range(2)]
              kpv_12 = kpv_list[0].merge_kpvs(kpv_list)
@@ -141,16 +143,12 @@ class Plot:
                 ax[k].set(xticks=[], xlabel='')
                 ax[k].legend()
              if title is not None: ax[0].set_title(title)
+             cbar_ax = fig.add_axes([0.85, 0.40, 0.04, 0.4])
+
         
         fig.subplots_adjust(right=0.8, hspace=0.03)
-        # cbar_ax = fig.add_axes([0.85, 0.40, 0.04, 0.4])
-        cbar_ax = fig.add_axes([0.81, 0.40, 0.020, 0.4])
         fig.colorbar(obj, cax=cbar_ax)   
-        # if title is not None:
-        #     ax[0].set_title(title) 
-
-
-        
+       
         # plt.show()
         if outname is not None:
             fig.savefig(outname, dpi=200, bbox_inches='tight', facecolor='white')

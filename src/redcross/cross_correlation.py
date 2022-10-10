@@ -6,6 +6,7 @@ from copy import deepcopy
 import astropy.units as u
 from .datacube import Datacube
 from pathos.pools import ProcessPool
+from joblib import Parallel, delayed
 
 c = 2.998e5 # km/s
 
@@ -14,7 +15,7 @@ class CCF(Datacube):
     def __init__(self, rv=None, template=None, flux=None, **kwargs):
         self.rv = rv
         if not self.rv is None: self.dRV = np.mean(np.diff(self.rv)) # resolution
-        self.template = template
+        self.template = template.copy()
         self.flux = flux
         
         
@@ -47,66 +48,60 @@ class CCF(Datacube):
         self.gTemp -= np.nanmean(self.gTemp, axis=0) 
         return self
     
-    def cross_correlation(self, o):
-        # if order is not None:
-        #     wave = self.dc.wlt[order,:]
-        #     flux = self.dc.flux[order,:,:]
-        # else:
-        #     wave = self.dc.wlt
-        #     flux = self.dc.flux
-        
-        dco = self.dc.order(o)
+    def cross_correlation(self, dco, spline=False):
+        '''Basic cross-correlation between a single-order datacube `dco` 
+        and a 1D template'''
+        # manage NaNs
         nans = np.isnan(dco.wlt)
         wave, flux = dco.wlt[~nans], dco.flux[:,~nans]
-            
+        # the data mean subtracted 
+        f = flux - np.mean(flux)
         
-        # self.__prepare_template(wave[~nans]) # OLD WAY OF DOING CCF (actually slower)
-        
-        
-        # the data is weighted by the variance of each pixel channel (sigma^2)
-        data = flux - np.nanmean(flux, axis=0)
-        f = data / np.var(data, axis=0)
-        
-        temp = self.template.copy().crop(np.min(wave), np.max(wave), eps=0.30).sort()
+        temp = self.template.copy().crop(np.min(wave), np.max(wave), eps=0.20)
         temp.flux -= np.mean(temp.flux)
-        # cs = splrep(temp.wlt, temp.flux)
-        # print(cs)
+    
         
         # shifts
         beta = 1 - (self.rv/c)
         # build 2D template (for every RV-shift)
-        # g = np.array([splev(wave*beta[j], cs) for j in range(beta.size)])
-        g = np.array([interp1d(temp.wlt, temp.flux)(wave*beta[j]) for j in range(beta.size)])
-            
-        ccf_i = np.dot(f, g.T)
-            
+        if spline:
+            # For templates at very high resolution (~ 1e6) the spline decomposition fails
+            # because the points are **too close** together (oversampled)
+            cs = splrep(temp.wlt, temp.flux)
+            g = np.array([splev(wave*b, cs) for b in beta])
+        else:
+            # when spline fails... linear interpolation doesn't
+            # for very high-res templates there's no difference in the results
+            _inter = interp1d(temp.wlt, temp.flux)
+            g = np.array([_inter(wave*b) for b in beta])
+
+        # compute the CCF-map in one step, `_i` refers to the given order      
+        ccf_i = np.dot(f/np.var(f, axis=0), g.T)
         return ccf_i
     
-    def run(self, dc):
+    def run(self, dc, apply_filter=False, ax=None):
         self.frame = dc.frame
         start=time.time()
         
-        self.dc = dc.copy()
-        self.flux = np.zeros((dc.nObs, self.rv.size))
-        
-        
+        if apply_filter:
+            if hasattr(dc, 'reduction'):
+                if 'high_pass_gaussian' in dc.reduction:
+                    window = dc.reduction['high_pass_gaussian']['window']
+                    print('Applying filter of window = {:} pixels'.format(window))
+                    self.template.high_pass_gaussian(window, mode='divide')
+    
         if len(dc.shape) > 2:
-            orders = np.arange(0, dc.nOrders)
+            # Iterate over orders and sum each CCF_i
+            orders = np.arange(0, dc.nOrders, dtype=int)
+            self.flux = np.sum(np.array([self.cross_correlation(dc.order(o), spline=False) for o in orders]), axis=0)
+            # self.flux = sum([self.cross_correlation(dc.order(o), spline=False) for o in orders])
 
-            if self.num_cpus > 0:
-                pool = ProcessPool(nodes=self.num_cpus)
-                output = np.array(pool.amap(self.cross_correlation, orders).get())
-                self.flux = np.sum(output, axis=0)
-                
-            else:
-                self.flux = sum([self.cross_correlation(dc.order(o)) for o in orders])
-                
-            
-        else:
+        else: # single order CCF (or merged datacube)
             self.flux = self.cross_correlation(dc)
             
-        delattr(self, 'dc') # avoid overloading memory
         print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
+        print('mean {:.4e} -- std {:.4f}'.format(np.mean(self.flux), np.std(self.flux)))
+        if ax != None: self.imshow(ax=ax)
         return self
    
     # def run(self, dc, debug=False, ax=None):
@@ -240,10 +235,10 @@ class KpV:
         for ikp in range(len(self.kpVec)):
             self.rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
             
-            # for iObs in range(self.planet.RV.size):
             for iObs in np.where(ecl==False)[0]:
                 outRV = self.vrestVec + self.rv_planet[iObs]
                 snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
+                
             
         if snr:
             noise_map = np.std(snr_map[:,np.abs(self.vrestVec)>self.bkg])

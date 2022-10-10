@@ -12,6 +12,8 @@ import astropy.units as u
 import astropy.constants as const
 from .datacube import Datacube
 from pathos.pools import ProcessPool
+from scipy import ndimage
+
 
 # constants in CGS
 c_cgs = 29979245800.0 # cm/s
@@ -196,19 +198,13 @@ class Template(Datacube):
       return self  
 
 
-    def high_pass_gaussian(self, window=None, dRV=0., debug=False):
-        from scipy import ndimage
-        if dRV > 0.:
-            pixscale = const.c.to('km/s').value * np.mean(np.diff(self.wlt)) / np.median(self.wlt)
-            window = 2 * dRV * pixscale
-            if debug: print('window = {:.2f} pixels'.format(window))
-            
+    def high_pass_gaussian(self, window=15., mode='subtract', debug=False):    
         lowpass = ndimage.gaussian_filter1d(self.flux, window)
-        if hasattr(self, 'gflux'):
-            nans = self.nans
-            for row in range(self.gflux.shape[0]):
-                self.gflux[row,~nans] /= ndimage.gaussian_filter1d(self.gflux[row,~nans], window)
-        self.flux /= lowpass
+        # if hasattr(self, 'gflux'):
+        #     nans = self.nans
+        #     for row in range(self.gflux.shape[0]):
+        #         self.gflux[row,~nans] /= ndimage.gaussian_filter1d(self.gflux[row,~nans], window)
+        self.flux = getattr(np, mode)(self.flux, lowpass) # subtract or divide
         return self
     
     

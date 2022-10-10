@@ -17,7 +17,7 @@ class SysRem:
         
         
         
-        if dco.flux_err is None: # IMPORTANT STEP
+        if not hasattr(dco, 'flux_err'): # IMPORTANT STEP
             dco.estimate_noise()
             
 #        dco.estimate_noise()   
