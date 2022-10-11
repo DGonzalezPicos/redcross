@@ -21,6 +21,7 @@ class CCF(Datacube):
         
         self.window = 0. # high pass gaussian to apply to the template before CCF.run()
         self.num_cpus = 6 # by default
+        self.spline = False # use linear interpolation unless this is True
     def normalise(self):
         self.flux = self.flux / np.median(self.flux, axis=0)
         return self  
@@ -48,7 +49,7 @@ class CCF(Datacube):
         self.gTemp -= np.nanmean(self.gTemp, axis=0) 
         return self
     
-    def cross_correlation(self, dco, spline=False):
+    def cross_correlation(self, dco, noise=None):
         '''Basic cross-correlation between a single-order datacube `dco` 
         and a 1D template'''
         # manage NaNs
@@ -64,7 +65,7 @@ class CCF(Datacube):
         # shifts
         beta = 1 - (self.rv/c)
         # build 2D template (for every RV-shift)
-        if spline:
+        if self.spline:
             # For templates at very high resolution (~ 1e6) the spline decomposition fails
             # because the points are **too close** together (oversampled)
             cs = splrep(temp.wlt, temp.flux)
@@ -75,11 +76,16 @@ class CCF(Datacube):
             _inter = interp1d(temp.wlt, temp.flux)
             g = np.array([_inter(wave*b) for b in beta])
 
-        # compute the CCF-map in one step, `_i` refers to the given order      
-        ccf_i = np.dot(f/np.var(f, axis=0), g.T)
+        # compute the CCF-map in one step, `_i` refers to the given order 
+        if noise is not None:
+            noise2 = noise**2
+        else:
+            noise2 = np.var(f, axis=0)
+            
+        ccf_i = np.dot(f/noise2, g.T)
         return ccf_i
     
-    def run(self, dc, apply_filter=False, ax=None):
+    def run(self, dc, apply_filter=False, noise=None, ax=None):
         self.frame = dc.frame
         start=time.time()
         
@@ -93,11 +99,11 @@ class CCF(Datacube):
         if len(dc.shape) > 2:
             # Iterate over orders and sum each CCF_i
             orders = np.arange(0, dc.nOrders, dtype=int)
-            self.flux = np.sum(np.array([self.cross_correlation(dc.order(o), spline=False) for o in orders]), axis=0)
+            self.flux = np.sum(np.array([self.cross_correlation(dc.order(o), noise) for o in orders]), axis=0)
             # self.flux = sum([self.cross_correlation(dc.order(o), spline=False) for o in orders])
 
         else: # single order CCF (or merged datacube)
-            self.flux = self.cross_correlation(dc)
+            self.flux = self.cross_correlation(dc, noise)
             
         print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
         print('mean {:.4e} -- std {:.4f}'.format(np.mean(self.flux), np.std(self.flux)))

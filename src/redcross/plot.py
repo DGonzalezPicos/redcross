@@ -36,7 +36,8 @@ class Plot:
         colors = np.array([cmap(x) for x in range(dc.nOrders)])
         
         dc.flux_err[dc.flux_err==0.0] = np.nan
-        snr_order = np.nanmean(dc.flux / dc.flux_err, axis=(1,2))
+    
+        snr_order = np.nanpercentile(dc.flux / dc.flux_err, 90, axis=(1,2))
         cenwave = np.median(dc.wlt, axis=1)
         widths = np.array([dc.wlt[x,:].max()-dc.wlt[x,:].min() for x in range(dc.wlt.shape[0])])
         
