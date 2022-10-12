@@ -492,13 +492,22 @@ class Datacube:
         '''copy of `to_stellar_frame` for any RV'''
         if isinstance(RV, np.floating):
             RV *= np.ones(self.nObs)
-        self.sort_wave()
+        # self.sort_wave()
         nans = np.isnan(self.wlt)
         beta = 1.0 - (RV*u.km/u.s/const.c).decompose().value
         for f in range(self.nObs):
             cs = splrep(self.wlt[~nans], self.flux[f,~nans])
             self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
 
+        return self
+    
+    def subtract_column(self):
+        self.flux -= np.nanmean(self.flux, axis=0)
+        return self
+    
+    def trim(self, npix=100):
+        self.wlt = self.wlt[npix:-npix]
+        self.flux = self.flux[:, npix:-npix]
         return self
     
     # def to_stellar_frame(self, BERV):
