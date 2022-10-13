@@ -169,9 +169,12 @@ class Datacube:
         '''similar to `order()` but with a set of predefined orders for each
         band. Customised to GIANO.'''
         bands = {
-            'J': [3,4,5,6,7,8,9,10, 15,16,17,18,19,20,21,22,23],
-            'H': np.arange(29, 39),
-            'K': np.arange(42, 50)}
+            'Y':[3,4,5,6,7,8,9,10,11],
+            'J': [15,16,17,18,19,20,21,22,23],
+            'H': np.arange(30, 39),
+            'K': np.arange(42, 50),
+            'I': [0,1,2,12,13,14,24,25,26,27,28,29,39,40,41]}
+        # the I-band stands for IGNORED (not the Infra-red)
         
         if len(b) > 1: # more than one band
              [bands[x] for x in b]
@@ -189,11 +192,15 @@ class Datacube:
         dco = self.copy()
     
         if type(o) in [list, np.ndarray]:
-                dco.wlt = dco.wlt[o[0]:o[-1]+1,]
-                dco.flux = dco.flux[o[0]:o[-1]+1,]
+                # dco.wlt = dco.wlt[o[0]:o[-1]+1,]
+                # dco.flux = dco.flux[o[0]:o[-1]+1,]
+                # if hasattr(dco, 'flux_err'):
+                #     dco.flux_err = dco.flux_err[o[0]:o[-1]+1,]
+                dco.wlt = dco.wlt[o,]
+                dco.flux = dco.flux[o,]
                 if hasattr(dco, 'flux_err'):
-                    dco.flux_err = dco.flux_err[o[0]:o[-1]+1,]
-    
+                    dco.flux_err = dco.flux_err[o,]
+                
         else:
             if len(dco.wlt.shape)>2:
                 dco.wlt = dco.wlt[o,:,:]
@@ -257,7 +264,7 @@ class Datacube:
         if ax != None: self.imshow(ax=ax)   
         return self
     
-    def remove_continuum(self, mode='polyfit', deg=3., ax=None):
+    def remove_continuum(self, mode='polyfit', ax=None, **kwargs):
         '''for each order, remove the continuum by dividing by the residuals 
         from the master subtraction'''
         
@@ -269,18 +276,30 @@ class Datacube:
                 else: # common wavelength grid
                     wave = self.wlt
                 nans = np.isnan(wave)
-                model = np.poly1d(np.polyfit(wave[~nans], self.flux[f,~nans], deg))
+                model = np.poly1d(np.polyfit(wave[~nans], self.flux[f,~nans], **kwargs))
                 continuum = model(wave[~nans])
                 self.flux[f,~nans] /= continuum
                 if hasattr(self, 'flux_err'):
                     self.flux_err[f,~nans] /= continuum
-        else:
-            master = np.nanmedian(self.flux, axis=0) 
-            g1d_kernel = Gaussian1DKernel(300)
-            for frame in range(self.shape[0]):
-                divide = convolve_fft((self.flux[frame,] / master), g1d_kernel, boundary='wrap')
-                self.flux[frame,] /= divide
+        elif 'gaussian_filter':
+            # master = np.nanmedian(self.flux, axis=0) 
+            # g1d_kernel = Gaussian1DKernel(300)
+            # for frame in range(self.shape[0]):
+            #     divide = convolve_fft((self.flux[frame,] / master), g1d_kernel, boundary='wrap')
+            #     self.flux[frame,] /= divide
+            self.high_pass_gaussian(mode='divide', **kwargs)
         if ax != None: self.imshow(ax=ax)        
+        return self
+    
+    def divide_master(self, window=30., ax=None):
+        from scipy import ndimage
+        master = np.median(self.flux, axis=0)
+        # g1d_kernel = Gaussian1DKernel(100)
+        # smooth = convolve_fft(master, g1d_kernel, boundary='wrap')
+        
+        self.flux /= ndimage.gaussian_filter1d(master, window)
+        
+        if ax != None: self.imshow(ax=ax) 
         return self
     
     def airmass_detrend(self, mode='divide', ax=None, save_model=False):
@@ -383,23 +402,21 @@ class Datacube:
 
     
     
-    def high_pass_gaussian(self, window=15, mode='subtract', dRV=0., ax=None):
+    def high_pass_gaussian(self, window=15, mode='subtract', ax=None):
         '''Apply a High-Pass Gaussian filter by subtracting a Low-Pass filter from the Data
         Pass the window in units of pixels. Blur only along the wavelength dimension (axis=1)'''
         from scipy import ndimage
 
         nans = np.isnan(self.wlt)
-        if dRV > 0.:
-            pixscale = const.c.to('km/s').value * np.nanmean(np.diff(self.wlt)) / np.nanmedian(self.wlt)
-            window = 2 * dRV * pixscale
         
         lowpass = ndimage.gaussian_filter(self.flux[:,~nans], [0, window])
-        if mode=='divide':
-            self.flux[:,~nans] /= lowpass
-            if hasattr(self, 'flux_err'):
+        # Divide or Subtract by the low-pass Gaussian filter 
+        self.flux[:,~nans] = getattr(np, mode)(self.flux[:,~nans], lowpass)
+        
+        # Propagate errors when **dividing**
+        if hasattr(self, 'flux_err'):
+            if mode=='divide':
                 self.flux_err[:,~nans] /= lowpass
-        elif mode=='subtract':
-            self.flux[:,~nans] -= lowpass
         
         if ax != None: self.imshow(ax=ax)
         return self
@@ -488,7 +505,7 @@ class Datacube:
         self = Align(dco).apply_shifts(ax=ax).dco
         return self
 
-    def shift(self, RV):
+    def shift(self, RV, mode='linear'):
         '''copy of `to_stellar_frame` for any RV'''
         if isinstance(RV, np.floating):
             RV *= np.ones(self.nObs)
@@ -496,8 +513,13 @@ class Datacube:
         nans = np.isnan(self.wlt)
         beta = 1.0 - (RV*u.km/u.s/const.c).decompose().value
         for f in range(self.nObs):
-            cs = splrep(self.wlt[~nans], self.flux[f,~nans])
-            self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
+            if mode=='spline':
+                cs = splrep(self.wlt[~nans], self.flux[f,~nans])
+                self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
+            elif mode=='linear':
+                self.flux[f,~nans] = interp1d(self.wlt[~nans], self.flux[f,~nans], 
+                                              fill_value=np.nan, bounds_error=False,
+                                              )(self.wlt[~nans]*beta[f])
 
         return self
     

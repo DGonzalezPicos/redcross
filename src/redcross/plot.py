@@ -30,7 +30,7 @@ class Plot:
         return obj
         
     
-    def data_orders(self, dc, orders=[]):
+    def data_orders(self, dc, ax, orders=[]):
         
         cmap = plt.cm.get_cmap('viridis', dc.nOrders)
         colors = np.array([cmap(x) for x in range(dc.nOrders)])
