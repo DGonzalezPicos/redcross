@@ -402,7 +402,7 @@ class Datacube:
 
     
     
-    def high_pass_gaussian(self, window=15, mode='subtract', ax=None):
+    def high_pass_gaussian(self, window=15, mode='divide', ax=None):
         '''Apply a High-Pass Gaussian filter by subtracting a Low-Pass filter from the Data
         Pass the window in units of pixels. Blur only along the wavelength dimension (axis=1)'''
         from scipy import ndimage
@@ -687,6 +687,11 @@ class Datacube:
     def resample(self, wave):
         cs = splrep(self.wlt, self.flux)
         self.flux = splev(wave, cs)
+        return self
+    
+    def continuum_remove(self):
+        self.normalise().sigma_clip(5.).remove_continuum('polyfit', deg=7)
+        self.divide_master(30.)
         return self
 #  
 #            

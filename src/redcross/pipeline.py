@@ -43,8 +43,8 @@ class Pipeline:
                 props = dict(boxstyle='round', facecolor='black', alpha=0.65)
 #                s = np.round(np.nanmean(np.nanstd(dco.flux, axis=0)), 4)
                 
-                sigma = '$\sigma$ = {:.4f}'.format(np.nanstd(dco.flux))
-                x = [0.02, 0.90]
+                sigma = '$\sigma$ = {:.2f}%'.format(np.nanstd(dco.flux)*100)
+                x = [0.02, 0.89]
                 y = 0.70
                 for j,s in enumerate([fun, sigma]):
                     ax[i+1].text(s=s, x=x[j], y=y, transform=ax[i+1].transAxes, c='white',
