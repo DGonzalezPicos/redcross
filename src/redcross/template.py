@@ -31,6 +31,8 @@ class Template(Datacube):
         else:
             self.wlt = wlt
             self.flux = flux
+            
+        self.mode = 'linear' # by default use **linear** interpolation
     @property
     def resolution(self):
         return np.round(np.median(self.wlt) / np.mean(np.diff(self.wlt)), 0)
@@ -94,11 +96,11 @@ class Template(Datacube):
             new_wave = self.new_wlt
             
         
-        if np.isnan(self.cs[1]).any():
-            c_int = interp1d(self.wlt, self.flux, bounds_error=False, fill_value=0.0)
-            gflux = c_int(new_wave*beta)
+        # if np.isnan(self.cs[1]).any():
+        if self.mode == 'linear':
+            gflux = self.cl(new_wave*beta)
             
-        else:
+        elif self.mode == 'spline':
             gflux = splev(new_wave*beta, self.cs)
             
         if return_self:
@@ -136,9 +138,14 @@ class Template(Datacube):
         return self
         
         
-    def shift_2D(self, RV, wave=None, num_cpus=0):
+    def shift_2D(self, RV, wave=None, num_cpus=0, mode='linear'):
         # compute the spline coefficients once (and store them)
-        self.get_spline()
+        self.mode = mode
+        if self.mode == 'spline':
+            self.get_spline()
+        elif self.mode == 'linear':
+            self.cl = interp1d(self.wlt, self.flux, bounds_error=False, fill_value=0.0)
+            
             
         c = const.c.to('km/s').value
         self.rv = RV
@@ -157,9 +164,7 @@ class Template(Datacube):
         else:
             output = [temp.interpolate(beta[i]) for i in range(beta.size)]
             
-        temp.gflux = np.array(output)   
-        temp.wlt = temp.new_wlt
-        temp_dc = Datacube(wlt=temp.new_wlt, flux=temp.gflux)
+        temp_dc = Datacube(wlt=temp.new_wlt, flux=np.array(output) )
         temp_dc.rv = temp.rv
         return temp_dc
     

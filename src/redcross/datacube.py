@@ -523,6 +523,20 @@ class Datacube:
 
         return self
     
+    def to_bary_frame(self):
+        '''short-chut to calling `shift` with argument `-dc.BERV' and
+        updating the datacube `frame` attribute'''
+        if self.nOrders > 1:
+            for o in range(self.nOrders):
+                dco = self.order(o).shift(-self.BERV)
+                self.update(dco, o)   
+        else:
+            self.shift(-self.BERV) # signed tested for HARPS-N/GIANO-B
+            
+        self.frame = 'bary'
+        return self
+        
+    
     def subtract_column(self):
         self.flux -= np.nanmean(self.flux, axis=0)
         return self
