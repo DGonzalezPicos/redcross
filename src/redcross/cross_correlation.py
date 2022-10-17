@@ -348,7 +348,8 @@ class KpV:
         self.peak_snr = self.snr[self.indh,self.indv]
         return self
         
-    def fancy_figure(self, figsize=(6,6), peak=None, v_range=None, outname=None, title=None):
+    def fancy_figure(self, figsize=(6,6), peak=None, v_range=None, 
+                     outname=None, title=None, **kwargs):
         '''Plot Kp-Vsys map with horizontal and vertical slices 
         snr_max=True prints the SNR for the maximum value'''
         import matplotlib.gridspec as gridspec
@@ -361,6 +362,7 @@ class KpV:
         # ax2 = fig.add_subplot(gs[0,1])
         plt.setp(ax2.get_xticklabels(), visible=False)
         plt.setp(ax3.get_yticklabels(), visible=False)
+        ax3.xaxis.tick_top()
         
         if not v_range is None:
             vmin = v_range[0]
@@ -371,6 +373,11 @@ class KpV:
         else:
             vmin = self.snr.min()
             vmax = self.snr.max()
+        
+        # Sync secondary axes
+        span = vmax - vmin
+        ax2.set_ylim(vmin - 0.1*span, vmax + 0.1*span)
+        ax3.set_xlim(vmin - 0.1*span, vmax + 0.1*span)
             
         lims = [self.vrestVec[0],self.vrestVec[-1],self.kpVec[0],self.kpVec[-1]]
 
@@ -378,16 +385,18 @@ class KpV:
                          cmap='inferno', vmin=vmin, vmax=vmax)
     
         # figure settings
-        ax1.set(ylabel='Kp (km/s)', xlabel='Vrest (km/s)')
-        fig.colorbar(obj, ax=ax3, pad=0.05)
+        ax1.set(ylabel='$K_p$ (km/s)', xlabel='$\Delta v$ (km/s)', **kwargs)
+        
+        # colorbar
+        cax = fig.add_axes([ax3.get_position().x1+0.01,ax3.get_position().y0,
+                            0.035,ax3.get_position().height])
+
+        fig.colorbar(obj, cax=cax)
+        
         if peak is None:
             peak = self.snr_max()
        # get the values     
         self.snr_at_peak(peak)
-        
-        # indv = np.abs(self.vrestVec - peak[0]).argmin()
-        # self.indh = np.abs(self.kpVec - peak[1]).argmin()
-        # self.peak_snr = self.snr[self.indh,indv]
     
         row = self.kpVec[self.indh]
         col = self.vrestVec[self.indv]
@@ -398,14 +407,12 @@ class KpV:
         
         
     
-        line_args = {'ls':':', 'c':'white','alpha':0.35,'lw':'3.'}
+        line_args = {'ls':':', 'c':'white','alpha':0.35,'lw':'3.', 'dashes':(0.7, 1.)}
         ax1.axhline(y=row, **line_args)
         ax1.axvline(x=col, **line_args)
-        ax1.scatter(col, row, marker='*', c='red',label='SNR = {:.2f}'.format(self.peak_snr))
-        ax1.legend()
+        ax1.scatter(col, row, marker='*', c='red',label='SNR = {:.2f}'.format(self.peak_snr), s=6.)
+        ax1.legend(handlelength=0.75)
     
-        ax1.set(xlabel='Vrest (km/s)', ylabel='Kp (km/s)')
-
         if title != None:
             fig.suptitle(title, x=0.45, y=0.915, fontsize=14)
     

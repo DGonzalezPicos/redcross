@@ -17,6 +17,7 @@ from scipy import ndimage
 
 # constants in CGS
 c_cgs = 29979245800.0 # cm/s
+c = 2.9979e5 # km/s
 h = 6.62606957e-27
 kB = 1.3806488e-16 
 
@@ -147,7 +148,7 @@ class Template(Datacube):
             self.cl = interp1d(self.wlt, self.flux, bounds_error=False, fill_value=0.0)
             
             
-        c = const.c.to('km/s').value
+        # c = const.c.to('km/s').value
         self.rv = RV
         beta = 1 - (self.rv/c)
         
@@ -203,12 +204,14 @@ class Template(Datacube):
       return self  
 
 
-    def high_pass_gaussian(self, window=15., mode='subtract', debug=False):    
+    def high_pass_gaussian(self, window=15., deltaV=None, mode='subtract', debug=False):   
+        
+        if deltaV is not None:
+            self.dRV = np.mean(np.diff(self.wlt)/np.median(self.wlt)) * c
+            window = deltaV / self.dRV
+            print(window)
         lowpass = ndimage.gaussian_filter1d(self.flux, window)
-        # if hasattr(self, 'gflux'):
-        #     nans = self.nans
-        #     for row in range(self.gflux.shape[0]):
-        #         self.gflux[row,~nans] /= ndimage.gaussian_filter1d(self.gflux[row,~nans], window)
+        
         self.flux = getattr(np, mode)(self.flux, lowpass) # subtract or divide
         return self
     
@@ -238,28 +241,25 @@ class Template(Datacube):
         self.flux /= y_continuum_fitted.value
         return self
     
-    def pyAstro_convolve(self, row=-1):
+    # def pyAstro_convolve(self, row=-1):
+    #     from PyAstronomy import pyasl
+    #     if row < 0:
+    #         flux = self.flux
+    #     else:
+    #         flux = self.gflux[row, ~self.nans]
+    #     newflux = pyasl.instrBroadGaussFast(self.wlt[~self.nans], flux,
+    #                                         self.res, edgeHandling="firstlast", fullout=False, equid=True,maxsig=5.0)
+        
+    #     return newflux
+    
+    def convolve_instrument(self, res):
         from PyAstronomy import pyasl
-        if row < 0:
-            flux = self.flux
-        else:
-            flux = self.gflux[row, ~self.nans]
-        newflux = pyasl.instrBroadGaussFast(self.wlt[~self.nans], flux,
-                                            self.res, edgeHandling="firstlast", fullout=False, equid=True,maxsig=5.0)
+        # dRV = np.mean(np.diff(wave)/np.median(wave)) * c
+        # print(dRV)
         
-        return newflux
-    def convolve_instrument(self, res=50e3, num_cpus=5):
-        import multiprocessing as mp
-        
-        self.res = res
-        if hasattr(self, 'gflux'):
-            rows = np.arange(0, self.gflux.shape[0])
-            with mp.Pool(num_cpus) as p:
-                output = p.map(self.pyAstro_convolve, rows)
-                
-            self.gflux[:,~self.nans] = np.array(output)
-        else:
-            self.flux = self.pyAstro_convolve()
+        self.flux = pyasl.instrBroadGaussFast(self.wlt, self.flux,
+                                            res, edgeHandling="firstlast",
+                                            fullout=False, equid=True, maxsig=5.0)
         return self
     
     def boost(self, factor=10.):
@@ -307,6 +307,30 @@ class Template(Datacube):
             self.wlt = np.median(wave, axis=0)
             self.flux = np.sum(flux, axis=0)
             return self
+        
+    @staticmethod
+    def rotational_kernel(vsini, wave):
+        dRV = np.mean(np.diff(wave)/np.median(wave)) * c
+        nker = 401
+        hnker = (nker-1)//2
+        rker = np.zeros(nker)
+        for ii in range(nker):
+            ik = ii - hnker
+            x = ik*dRV / vsini
+            if np.abs(x) < 1.0:
+                y = np.sqrt(1-x**2)
+                rker[ii] = y
+        rker /= rker.sum()
+        
+        return rker
+    
+    def rot_broaden(self, vsini, wave):
+        rker = self.rotational_kernel(vsini, wave)
+        mean = np.nanmean(self.flux)
+        self.flux = np.convolve(self.flux-mean, rker, mode='same')
+        self.flux += mean
+        return self
+    
         
 
     
