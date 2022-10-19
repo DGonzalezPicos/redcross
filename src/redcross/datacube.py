@@ -216,6 +216,7 @@ class Datacube:
     
     def normalise(self, ax=None):
        self.flux = (self.flux.T / np.nanmedian(self.flux, axis=1)).T
+       
        if hasattr(self, 'flux_err'):
            self.flux_err = (self.flux_err.T / np.nanmedian(self.flux, axis=1)).T
            
@@ -293,11 +294,13 @@ class Datacube:
     
     def divide_master(self, window=30., ax=None):
         from scipy import ndimage
-        master = np.median(self.flux, axis=0)
+        nans = np.isnan(self.wlt)
+        
+        master = np.median(self.flux[:,~nans], axis=0)
         # g1d_kernel = Gaussian1DKernel(100)
         # smooth = convolve_fft(master, g1d_kernel, boundary='wrap')
         
-        self.flux /= ndimage.gaussian_filter1d(master, window)
+        self.flux[:,~nans] /= ndimage.gaussian_filter1d(master, window)
         
         if ax != None: self.imshow(ax=ax) 
         return self
@@ -511,29 +514,36 @@ class Datacube:
             RV *= np.ones(self.nObs)
         # self.sort_wave()
         nans = np.isnan(self.wlt)
+        wave = self.wlt[~nans]
+        # wave0 = self.wlt[~nans] # input wavelength vector
+        # edge = 50 # IGNORE N pixels on each edge of the detector
+        # wave = wave0[edge:-edge]
+        
+        
+        
         beta = 1.0 - (RV*u.km/u.s/const.c).decompose().value
+        
         for f in range(self.nObs):
-            if mode=='spline':
-                cs = splrep(self.wlt[~nans], self.flux[f,~nans])
-                self.flux[f,~nans] = splev(self.wlt[~nans]*beta[f], cs)
-            elif mode=='linear':
-                self.flux[f,~nans] = interp1d(self.wlt[~nans], self.flux[f,~nans], 
-                                              fill_value=np.nan, bounds_error=False,
-                                              )(self.wlt[~nans]*beta[f])
-
+            self.flux[f,~nans] = interp1d(self.wlt[~nans], self.flux[f,~nans], 
+                                          kind=mode, fill_value=np.nan, bounds_error=False, 
+                                              )(wave*beta[f])
+            
+        # Set extrapolated pixel channels to NaN (flux value already set to NaN by interp1d)
+        nancols = np.isnan(self.flux).any(axis=0)
+        self.wlt[np.where(nancols==True)] = np.nan
         return self
     
-    def to_bary_frame(self):
+    def to_barycentric_frame(self, mode='cubic'):
         '''short-chut to calling `shift` with argument `-dc.BERV' and
         updating the datacube `frame` attribute'''
-        if self.nOrders > 1:
-            for o in range(self.nOrders):
-                dco = self.order(o).shift(-self.BERV)
-                self.update(dco, o)   
-        else:
-            self.shift(-self.BERV) # signed tested for HARPS-N/GIANO-B
-            
-        self.frame = 'bary'
+
+        self.shift(-self.BERV, mode=mode) # signed tested for HARPS-N/GIANO-B            
+        self.frame = 'barycentric'
+        return self
+    
+    def to_stellar_frame(self, vsys, mode='linear'):
+        self.shift(vsys-self.BERV, mode=mode) # careful with signs... for WASP-189 vsys ~ -20 km/s           
+        self.frame = 'stellar'
         return self
         
     
@@ -654,6 +664,8 @@ class Datacube:
         and the order number'''
         self.wlt[order,:] = dco.wlt
         self.flux[order,:,:] = dco.flux
+        
+        self.frame = dco.frame # UPDATE Oct 19th 2022
         
         # if hasattr(self, 'flux_err'):
         #     self.flux_err[order,:,:] = dco.flux_err

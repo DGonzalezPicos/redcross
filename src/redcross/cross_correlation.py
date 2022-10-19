@@ -20,7 +20,7 @@ class CCF(Datacube):
         
         
         self.window = 0. # high pass gaussian to apply to the template before CCF.run()
-        self.num_cpus = 6 # by default
+        self.n_jobs = 6 # by default
         self.spline = False # use linear interpolation unless this is True
     def normalise(self):
         self.flux = self.flux / np.median(self.flux, axis=0)
@@ -56,6 +56,8 @@ class CCF(Datacube):
         nans = np.isnan(dco.wlt)
         wave, flux = dco.wlt[~nans], dco.flux[:,~nans]
         # the data mean subtracted 
+        # fnans = np.isnan(flux)
+        # flux[fnans] = np.nanmedian(flux) # TESTING
         f = flux - np.mean(flux)
         
         temp = self.template.copy().crop(np.min(wave), np.max(wave), eps=0.20)
@@ -99,7 +101,10 @@ class CCF(Datacube):
         if len(dc.shape) > 2:
             # Iterate over orders and sum each CCF_i
             orders = np.arange(0, dc.nOrders, dtype=int)
-            self.flux = np.sum(np.array([self.cross_correlation(dc.order(o), noise) for o in orders]), axis=0)
+            
+            output = Parallel(n_jobs=self.n_jobs)(delayed(self.cross_correlation)(dc.order(o), noise) for o in orders)
+            self.flux = np.sum(np.array(output), axis=0)
+            # self.flux = np.sum(np.array([self.cross_correlation(dc.order(o), noise) for o in orders]), axis=0)
             # self.flux = sum([self.cross_correlation(dc.order(o), spline=False) for o in orders])
 
         else: # single order CCF (or merged datacube)
@@ -123,9 +128,9 @@ class CCF(Datacube):
     #     if len(dc.shape) > 2:
     #         # from p_tqdm import p_map
     #         orders = np.arange(0, dc.nOrders)
-    #         pool = ProcessPool(nodes=self.num_cpus)
+    #         pool = ProcessPool(nodes=self.n_jobs)
     #         ccf_i = np.array(pool.amap(self.cross_correlation, orders).get())
-    #         # ccf_i = np.array(p_map(self.cross_correlation, orders, num_cpus=6))
+    #         # ccf_i = np.array(p_map(self.cross_correlation, orders, n_jobs=6))
     #         self.flux = np.sum(ccf_i, axis=0)
     #     else:
     #         # check whether the 2D template needs to be computed
@@ -150,11 +155,11 @@ class CCF(Datacube):
         flux_i = inter(self.rv+self.planet.RV[i])
         return flux_i
     
-    def to_planet_frame(self, planet, ax=None, num_cpus=6, return_self=False):
+    def to_planet_frame(self, planet, ax=None, n_jobs=6, return_self=False):
         ccf = self.copy()
         ccf.planet = planet
             
-        pool = ProcessPool(nodes=num_cpus)
+        pool = ProcessPool(nodes=n_jobs)
         flux_i = pool.amap(ccf.interpolate_to_planet, np.arange(self.nObs)).get()
         
         ccf.flux = np.array(flux_i)
@@ -217,8 +222,12 @@ class KpV:
             self.vrestVec = np.arange(-vrest_max, vrest_max, self.dRV)
             self.bkg = bkg
             
-            
-            self.num_cpus = 6 # for the functions that allow parallelisation
+            try:
+                self.planet.frame = self.ccf.frame
+                print(self.planet.frame)
+            except:
+                print('Define data rest frame...')
+            self.n_jobs = 6 # for the functions that allow parallelisation
             
     def shift_vsys(self, iObs):
         print(iObs)
@@ -239,10 +248,11 @@ class KpV:
         
         
         for ikp in range(len(self.kpVec)):
-            self.rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
-            
+            # self.rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
+            self.planet.Kp = self.kpVec[ikp]
+            pRV = self.planet.RV
             for iObs in np.where(ecl==False)[0]:
-                outRV = self.vrestVec + self.rv_planet[iObs]
+                outRV = self.vrestVec + pRV[iObs]
                 snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
                 
             
@@ -348,7 +358,7 @@ class KpV:
         self.peak_snr = self.snr[self.indh,self.indv]
         return self
         
-    def fancy_figure(self, figsize=(6,6), peak=None, v_range=None, 
+    def fancy_figure(self, figsize=(6,6), peak=None, vmin=None, vmax=None,
                      outname=None, title=None, **kwargs):
         '''Plot Kp-Vsys map with horizontal and vertical slices 
         snr_max=True prints the SNR for the maximum value'''
@@ -364,20 +374,12 @@ class KpV:
         plt.setp(ax3.get_yticklabels(), visible=False)
         ax3.xaxis.tick_top()
         
-        if not v_range is None:
-            vmin = v_range[0]
-            vmax = v_range[1]
-            # fix y-axis (x-axis) of secondary axes
-            ax2.set(ylim=(v_range[0], v_range[1]))
-            ax3.set(xlim=(v_range[0], v_range[1]))
-        else:
-            vmin = self.snr.min()
-            vmax = self.snr.max()
+        eps = 0.1 * (self.snr.max()-self.snr.max())
+        vmin = vmin or self.snr.min() - eps
+        vmax = vmax or self.snr.max() + eps
         
-        # Sync secondary axes
-        span = vmax - vmin
-        ax2.set_ylim(vmin - 0.1*span, vmax + 0.1*span)
-        ax3.set_xlim(vmin - 0.1*span, vmax + 0.1*span)
+        ax2.set_ylim(vmin, vmax)
+        ax3.set_xlim(vmin, vmax)
             
         lims = [self.vrestVec[0],self.vrestVec[-1],self.kpVec[0],self.kpVec[-1]]
 
@@ -431,14 +433,15 @@ class KpV:
         return None
     
     def load(self, path):
-        print('Loading Datacube from...', path)
+        print('Loading KpV object from...', path)
         d = np.load(path, allow_pickle=True).tolist()
         for key in d.keys():
             setattr(self, key, d[key])
         return self 
     
-    def plot_1D(self, peak, ax, vmin=None, vmax=None, label=None, return_data=False, **kwargs):
-        
+    def plot_1D(self, peak=None, ax=None, vmin=None, vmax=None, label=None, return_data=False, **kwargs):
+        ax = ax or plt.gca()
+        peak = peak or self.snr_max()[:2]
         vmin = vmin or self.snr.min()
         vmax = vmax or self.snr.max()
         ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()

@@ -37,8 +37,8 @@ class SysRem:
             
         # parameters for convergence
         self.max_iter = 1000  # maximum iterations for each sysrem component
-        self.atol = 1e-5 # absolute tolerance
-        self.rtol = 0.0 # relative tolerance
+        self.atol = 1e-3 # absolute tolerance
+        self.rtol = 1e-3 # relative tolerance
         
 
     def compute_c(self, a=None):   
@@ -83,7 +83,7 @@ class SysRem:
             a = self.compute_a(c) # recompute `a` with the new `c`
             m = np.outer(a,c) # correction matrix
             
-            dm = (m-m0)/self.sigma_ij # fractional change
+            dm = (m-m0)/self.err2 # fractional change
             if np.allclose(np.nanmean(dm), 0, rtol=self.rtol, atol=self.atol):
                 converge = True
                 break
@@ -101,7 +101,8 @@ class SysRem:
         self.sysrem_model += m
             
         if debug: 
-            std = np.nanmean(np.nanstd(self.r_ij, axis=1))
+            # std = np.nanmean(np.nanstd(self.r_ij, axis=1))
+            std = np.nanstd(self.r_ij)
             print('Convergence at iteration {:3} --- StDev = {:.4f}'.format(self.last_ac_iteration, std))
         return self
 

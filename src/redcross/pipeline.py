@@ -4,6 +4,7 @@ Created on Thu Aug 25 13:06:26 2022
 @author: dario
 """
 import numpy as np
+from joblib import Parallel, delayed
 
 class Pipeline:
     '''class to manage the reduction steps and apply them to a single-order datacube
@@ -13,7 +14,7 @@ class Pipeline:
         self.args = ([None for _ in range(len(self.steps))]) or []
         
         
-        self.num_cpus = 6 # by default
+        self.n_jobs = 6 # by default
         
     def add(self, step, args=None):
         self.steps.append(step)
@@ -52,19 +53,21 @@ class Pipeline:
             
         return dco
     
-    def reduce_orders(self, dc, num_cpus=None):
-        from p_tqdm import p_map
-        
-        num_cpus = num_cpus or self.num_cpus
-
+    def reduce_orders(self, dc, n_jobs=None, debug=False):
         orders = np.arange(0, dc.nOrders, dtype=int)
         self.dc = dc.copy() # make copy
         
-        print('Num cpus {:}'.format(num_cpus))
-        if num_cpus > 0:
+        n_jobs = n_jobs or self.n_jobs
+        print('Num cpus {:}'.format(n_jobs))
+        if n_jobs > 0:
+            verbose = 0
+            if debug:
+                verbose = 2
             # run parallel function over all orders
             # save results in the same shape as input datacube
-            output = p_map(self.reduce, orders, num_cpus=num_cpus)
+            # output = p_map(self.reduce, orders, n_jobs=n_jobs)
+            output = Parallel(n_jobs=self.n_jobs, verbose=verbose)(
+                delayed(self.reduce)(o) for o in orders)
             [self.dc.update(output[k], k) for k in range(len(output))]
         else:
             # no parallelisation

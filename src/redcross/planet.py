@@ -70,6 +70,9 @@ class Planet:
         elif self.frame == 'telluric':
             rvel = ((self.v_sys*u.km/u.s)-self.BERV*u.km/u.s).value
             
+        elif self.frame == 'barycentric':
+            rvel = self.v_sys
+            
         elif self.frame == 'planet':
             return np.zeros_like(self.BERV)
             
