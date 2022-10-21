@@ -77,6 +77,7 @@ class CCF(Datacube):
             # for very high-res templates there's no difference in the results
             _inter = interp1d(temp.wlt, temp.flux)
             g = np.array([_inter(wave*b) for b in beta])
+            
 
         # compute the CCF-map in one step, `_i` refers to the given order 
         if noise is not None:
@@ -84,7 +85,22 @@ class CCF(Datacube):
         else:
             noise2 = np.var(f, axis=0)
             
+    
+            
         ccf_i = np.dot(f/noise2, g.T)
+        
+        # if logL:
+        #     # CCF-to-LogLikelihood
+        #     N = wave.size
+        #     sf2 = np.dot(f/noise2, f.T)
+        #     alpha = 1.
+        #     sg2 = (alpha**2) * np.dot(g/noise2, g.T)
+            
+        #     sum_terms = sf2 + sg2 - (2*alpha*ccf_i)
+        #     logL_i = -0.5 * N * np.log(sum_terms / N)
+        #     return logL_i
+        
+        
         return ccf_i
     
     def run(self, dc, apply_filter=False, noise=None, ax=None):
@@ -244,11 +260,8 @@ class KpV:
             ecl = self.planet.mask_eclipse(return_mask=True)
             
         snr_map = np.zeros((len(self.kpVec), len(self.vrestVec)))
-        rvel = ((self.planet.v_sys*u.km/u.s)-self.planet.BERV*u.km/u.s).value 
         
-        
-        for ikp in range(len(self.kpVec)):
-            # self.rv_planet = rvel + (self.kpVec[ikp]*np.sin(2*np.pi*self.planet.phase))
+        for ikp in range(len(self.kpVec)):            
             self.planet.Kp = self.kpVec[ikp]
             pRV = self.planet.RV
             for iObs in np.where(ecl==False)[0]:
@@ -447,7 +460,7 @@ class KpV:
         ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
         # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
         label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
-        ax.plot(self.vrestVec, self.snr[ind_kp0,:], label=label, **kwargs)
+        ax.plot(self.vrestVec, self.snr[ind_kp0,:], '--o', label=label, **kwargs)
         ax.set(xlabel='$\Delta v}$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
         ax.set_ylim((vmin, vmax))
         ax.legend(frameon=False, loc='upper right')

@@ -145,6 +145,7 @@ class Datacube:
     def inject_signal(self, planet, template, RV=None, factor=1., ax=None):
         temp = template.copy()
         p = planet.copy()
+        p.frame = self.frame
         
         if factor > 1.: temp.boost(factor)
         
@@ -520,8 +521,8 @@ class Datacube:
         # wave = wave0[edge:-edge]
         
         
-        
-        beta = 1.0 - (RV*u.km/u.s/const.c).decompose().value
+        ##### SIGN #### positive to revert change
+        beta = 1.0 + (RV*u.km/u.s/const.c).decompose().value
         
         for f in range(self.nObs):
             self.flux[f,~nans] = interp1d(self.wlt[~nans], self.flux[f,~nans], 
@@ -536,7 +537,7 @@ class Datacube:
     def to_barycentric_frame(self, mode='cubic'):
         '''short-chut to calling `shift` with argument `-dc.BERV' and
         updating the datacube `frame` attribute'''
-
+        print('Mode...', mode)
         self.shift(-self.BERV, mode=mode) # signed tested for HARPS-N/GIANO-B            
         self.frame = 'barycentric'
         return self

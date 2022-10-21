@@ -34,6 +34,7 @@ class Planet:
             self.Kp = (self.v_orb * np.sin(np.radians(self.i))).value
             
         self.frame = 'telluric' # default
+        self.dphi = 0.0 # default (phase shift)
 
     @property
     def BJD(self, location='orm'):
@@ -76,7 +77,7 @@ class Planet:
         elif self.frame == 'planet':
             return np.zeros_like(self.BERV)
             
-            
+        # print(rvel)
         return (rvel + RV_planet)
     
     def interpolate(self, newX):
