@@ -49,18 +49,15 @@ class CCF(Datacube):
         self.gTemp -= np.nanmean(self.gTemp, axis=0) 
         return self
     
-    def cross_correlation(self, dco, noise=None):
+    def cross_correlation(self, dco, noise='var'):
         '''Basic cross-correlation between a single-order datacube `dco` 
         and a 1D template'''
         # manage NaNs
         nans = np.isnan(dco.wlt)
         wave, flux = dco.wlt[~nans], dco.flux[:,~nans]
-        # the data mean subtracted 
-        # fnans = np.isnan(flux)
-        # flux[fnans] = np.nanmedian(flux) # TESTING
         f = flux - np.mean(flux)
         
-        temp = self.template.copy().crop(np.min(wave), np.max(wave), eps=0.20)
+        temp = self.template.copy().crop(np.min(wave), np.max(wave), eps=0.40)
         temp.flux -= np.mean(temp.flux)
     
         
@@ -80,30 +77,15 @@ class CCF(Datacube):
             
 
         # compute the CCF-map in one step, `_i` refers to the given order 
-        if noise is not None:
-            noise2 = noise**2
-        else:
+        if noise == 'flux_err':
+            noise2 = dco.flux_err[:, ~nans]**2
+        elif noise == 'var':
             noise2 = np.var(f, axis=0)
             
+        # The CCF-map in one step
+        return np.dot(f/noise2, g.T)
     
-            
-        ccf_i = np.dot(f/noise2, g.T)
-        
-        # if logL:
-        #     # CCF-to-LogLikelihood
-        #     N = wave.size
-        #     sf2 = np.dot(f/noise2, f.T)
-        #     alpha = 1.
-        #     sg2 = (alpha**2) * np.dot(g/noise2, g.T)
-            
-        #     sum_terms = sf2 + sg2 - (2*alpha*ccf_i)
-        #     logL_i = -0.5 * N * np.log(sum_terms / N)
-        #     return logL_i
-        
-        
-        return ccf_i
-    
-    def run(self, dc, apply_filter=False, noise=None, ax=None):
+    def run(self, dc, apply_filter=False, noise='var', ax=None):
         self.frame = dc.frame
         start=time.time()
         
@@ -118,51 +100,17 @@ class CCF(Datacube):
             # Iterate over orders and sum each CCF_i
             orders = np.arange(0, dc.nOrders, dtype=int)
             
-            output = Parallel(n_jobs=self.n_jobs)(delayed(self.cross_correlation)(dc.order(o), noise) for o in orders)
+            # output = Parallel(n_jobs=self.n_jobs)(delayed(self.cross_correlation)(dc.order(o), noise) for o in orders)
+            output = [self.cross_correlation(dc.order(o), noise) for o in orders]
             self.flux = np.sum(np.array(output), axis=0)
-            # self.flux = np.sum(np.array([self.cross_correlation(dc.order(o), noise) for o in orders]), axis=0)
-            # self.flux = sum([self.cross_correlation(dc.order(o), spline=False) for o in orders])
-
+           
         else: # single order CCF (or merged datacube)
             self.flux = self.cross_correlation(dc, noise)
             
         print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
-        print('mean {:.4e} -- std {:.4f}'.format(np.mean(self.flux), np.std(self.flux)))
+        # print('mean {:.4e} -- std {:.4f}'.format(np.mean(self.flux), np.std(self.flux)))
         if ax != None: self.imshow(ax=ax)
         return self
-   
-    # def run(self, dc, debug=False, ax=None):
-    #     self.frame = dc.frame
-    #     start=time.time()
-    #     self.dc = dc.copy()        
-    #     # check if data has a HPG filter applied
-    #     # if True, apply the same filter to the template after resampling (window in pixels)
-    #     if hasattr(dc, 'reduction'):
-    #         if 'high_pass_gaussian' in dc.reduction:
-    #             self.window = dc.reduction['high_pass_gaussian']['window']
-                
-    #     if len(dc.shape) > 2:
-    #         # from p_tqdm import p_map
-    #         orders = np.arange(0, dc.nOrders)
-    #         pool = ProcessPool(nodes=self.n_jobs)
-    #         ccf_i = np.array(pool.amap(self.cross_correlation, orders).get())
-    #         # ccf_i = np.array(p_map(self.cross_correlation, orders, n_jobs=6))
-    #         self.flux = np.sum(ccf_i, axis=0)
-    #     else:
-    #         # check whether the 2D template needs to be computed
-    #         # this avoids recomputing when changing the data input for the same template
-    #         nans = np.isnan(dc.wlt)
-    #         if not hasattr(self, 'gTemp'):
-    #             self.__prepare_template(dc.wlt[~nans])
-    
-    #         self.flux = self.cross_correlation()
-                    
-    #     if debug:
-    #         print('CCF elapsed time: {:.2f} s'.format(time.time()-start))
-    #         print('CCF shape = {:}'.format(self.shape))
-            
-    #     if ax != None: self.imshow(ax=ax)
-    #     return self
     
     
     def interpolate_to_planet(self, i):
@@ -298,31 +246,7 @@ class KpV:
         print(varf, varg, R)
         return log_L
     
-    
-    
-    def logL_map(self, dco, template):
-        
-        f = dco.flux - np.mean(dco.flux)
-                
-        nx = dco.nPix    
-        cs = splrep(template.wlt, template.flux)
-        self.log_L = np.zeros((self.kpVec.size, self.vrestVec.size, dco.nObs))  
-        
-        rvel = ((self.planet.v_sys*u.km/u.s)-self.planet.BERV*u.km/u.s).value
-        for i,kp in enumerate(self.kpVec):
-            rv_planet = rvel + (self.kpVec[i]*np.sin(2*np.pi*self.planet.phase))
-            for frame in range(dco.nObs):
-                f = dco.flux[frame,:]
-                varf = np.dot(f,f)/nx
-                for j,vsys in enumerate(self.vrestVec):
-                    outRV = vsys + rv_planet[frame]
-                    wshift = outRV / 2.998e5
-                    g = splev(template.wlt*wshift, cs)
-                    varg = np.dot(g,g)/nx
-                    
-                    R = np.dot(f,g)/nx
-                    self.log_L[i,j,frame] += -0.5*nx * np.log(varf + varg - (2*R))
-        
+
         
         
     def snr_max(self, display=False):
@@ -338,7 +262,8 @@ class KpV:
             print('Max SNR = {:3.1f}'.format(self.bestSNR))
         return(bestVr, bestKp, self.bestSNR)
     
-    def plot(self, fig=None, ax=None, peak=None, vmin=None, vmax=None, label=''):
+    def plot(self, fig=None, ax=None, peak=None, vmin=None, vmax=None, label='',
+             plot_peak=True):
         lims = [self.vrestVec[0],self.vrestVec[-1],self.kpVec[0],self.kpVec[-1]]
         vmin = vmin or self.snr.min()
         vmax = vmax or self.snr.max()
@@ -347,21 +272,21 @@ class KpV:
         obj = ax.imshow(self.snr,origin='lower',extent=lims,aspect='auto', 
                         cmap='inferno',vmin=vmin,vmax=vmax, label=label)
         if not fig is None: fig.colorbar(obj, ax=ax, pad=0.05)
-        ax.set_xlabel('Rest-frame velocity (km/s)')
-        ax.set_ylabel('Kp (km/s)')
+        ax.set_xlabel('$\Delta$v (km/s)')
+        ax.set_ylabel('K$_p$ (km/s)')
 
-
-        peak = peak or self.snr_max()
+        if plot_peak:
+            peak = peak or self.snr_max()
+            
+            indv = np.abs(self.vrestVec - peak[0]).argmin()
+            indh = np.abs(self.kpVec - peak[1]).argmin()
         
-        indv = np.abs(self.vrestVec - peak[0]).argmin()
-        indh = np.abs(self.kpVec - peak[1]).argmin()
-    
-        row = self.kpVec[indh]
-        col = self.vrestVec[indv]
-        line_args = {'ls':':', 'c':'white','alpha':0.35,'lw':'3.'}
-        ax.axhline(y=row, **line_args)
-        ax.axvline(x=col, **line_args)
-        ax.scatter(col, row, marker='*', s=3., c='green',alpha=0.7,label='SNR = {:.2f}'.format(self.snr[indh,indv]))
+            row = self.kpVec[indh]
+            col = self.vrestVec[indv]
+            line_args ={'ls':':', 'c':'white','alpha':0.35,'lw':'3.'}
+            ax.axhline(y=row, **line_args)
+            ax.axvline(x=col, **line_args)
+            ax.scatter(col, row, marker='*', s=3., c='green',alpha=0.7,label='SNR = {:.2f}'.format(self.snr[indh,indv]))
 
         return obj
     
@@ -452,22 +377,97 @@ class KpV:
             setattr(self, key, d[key])
         return self 
     
-    def plot_1D(self, peak=None, ax=None, vmin=None, vmax=None, label=None, return_data=False, **kwargs):
+    @staticmethod
+    def gaussian(x, a, x0, sigma, y0):
+        return y0 + a*np.exp(-(x-x0)**2/(2*sigma**2))
+    
+    def __fit_slice(self, x,y, label):
+        from scipy.optimize import curve_fit
+        b = int(len(x) / 3) # ignore the first and last third of the data (consider only central region)
+        popt, pcov = curve_fit(self.gaussian, x[b:-b], y[b:-b],
+                               bounds=([0., x.min(), 0., -10.],
+                                       [np.inf, x.max(), np.inf, np.inf]))
+        # perr = np.sqrt(np.diag(pcov)) # uncertainty on the popt parameters
+        print('{:} = {:.2f} km/s'.format(label, popt[1]))
+        print('FWHM = {:.2f} km/s'.format(popt[2]))
+        return popt
+    
+    def get_slice(self, axis=0, peak=None, vmin=None, vmax=None, fit=False,
+                  ax=None, **kwargs):
+        peak = peak or self.snr_max()[:2]
+        peak = peak[::-1] # invert the peak x,y
+        vmin = vmin or self.snr.min()
+        vmax = vmax or self.snr.max()
+        
+        
+        
+        x_label = [r'$K_p$', r'$\Delta v$']
+        x = np.array([self.kpVec, self.vrestVec])
+        
+        ind = [np.abs(x[i] - peak[i]).argmin() for i in [0,1]][axis]
+        x = x[::-1][axis] # get the correct x...
+        
+        y = np.take(self.snr, ind, axis) # equivalent to self.snr[ind,:] for axis=0
+        
+        if fit:
+            popt = self.__fit_slice(x,y, x_label[::-1][axis])
+        
+        if ax != None:
+            label = '{:}\n{:.1f} km/s'.format(x_label[axis], peak[axis])
+            label = ''
+            ax.plot(x, y, label=label, **kwargs)
+            ax.set(ylabel='SNR', xlabel=x_label[::-1][axis]+' (km/s)', 
+                   xlim=(x.min(), x.max()), ylim=(vmin, vmax))
+            ax.set_title('CCF at {:} = {:.1f} km/s'.format(x_label[axis], peak[axis]))
+            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.4)
+            if fit:
+                ax.plot(x, self.gaussian(x, *popt), ls='--', alpha=0.9, 
+                        label='Gaussian fit', c='darkgreen')
+            ax.legend(handlelength=0.55)
+            
+        if fit:
+            return (y, popt)
+        return y
+        
+
+        
+        
+    
+    def plot_slice(self, mode='kp', peak=None, ax=None, vmin=None, vmax=None, 
+                   label=None, return_data=False, **kwargs):
         ax = ax or plt.gca()
         peak = peak or self.snr_max()[:2]
         vmin = vmin or self.snr.min()
         vmax = vmax or self.snr.max()
-        ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
-        # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
-        label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
-        ax.plot(self.vrestVec, self.snr[ind_kp0,:], '--o', label=label, **kwargs)
-        ax.set(xlabel='$\Delta v}$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
+        
+        
+        if mode == 'kp':
+            ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
+            # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
+            y = self.snr[ind_kp0,:]
+            label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
+            ax.plot(self.vrestVec, y, '-', label=label, **kwargs)
+            
+            ax.set(xlabel='$\Delta v$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
+            
+        elif mode == 'dv':
+            ind_dv0 = np.abs(self.vrestVec - peak[0]).argmin()
+            # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
+            y = self.snr[:,ind_dv0] # magnitude to plot / return
+            label = label or '$\Delta$v = {:.1f} km/s'.format(self.vrestVec[ind_dv0])
+            ax.plot(self.kpVec, y, '-', label=label, **kwargs)
+            ax.set(xlabel='$K_p$ (km/s)', ylabel='SNR', xlim=(self.kpVec.min(), self.kpVec.max()))
+            
         ax.set_ylim((vmin, vmax))
         ax.legend(frameon=False, loc='upper right')
+            
         if return_data:
-            return self.snr[ind_kp0,:]
+            return y
         else:
             return ax
+        
+        
+        
     
     def merge_kpvs(self, kpv_list):
         new_kpv = kpv_list[0].copy()
@@ -480,6 +480,14 @@ class KpV:
         new_kpv.snr -= bkg_map   
         new_kpv.snr /= noise_map
         return new_kpv
+    
+    def fit_peak(self):
+        self.fit = []
+        for i in range(2):
+            _, pfit = self.get_slice(i, fit=True)
+            # print(pfit)
+            self.fit.append(pfit[1:3])
+        return self
 
 
     

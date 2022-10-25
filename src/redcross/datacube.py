@@ -537,7 +537,7 @@ class Datacube:
     def to_barycentric_frame(self, mode='cubic'):
         '''short-chut to calling `shift` with argument `-dc.BERV' and
         updating the datacube `frame` attribute'''
-        print('Mode...', mode)
+        # print('Mode...', mode)
         self.shift(-self.BERV, mode=mode) # signed tested for HARPS-N/GIANO-B            
         self.frame = 'barycentric'
         return self
