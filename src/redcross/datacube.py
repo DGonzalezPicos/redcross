@@ -298,10 +298,11 @@ class Datacube:
         nans = np.isnan(self.wlt)
         
         master = np.median(self.flux[:,~nans], axis=0)
-        # g1d_kernel = Gaussian1DKernel(100)
-        # smooth = convolve_fft(master, g1d_kernel, boundary='wrap')
-        
-        self.flux[:,~nans] /= ndimage.gaussian_filter1d(master, window)
+
+        lowpass = ndimage.gaussian_filter1d(master, window)
+        self.flux[:,~nans] /= lowpass
+        if hasattr(self, 'flux_err'):
+            self.flux_err[:,~nans] /= lowpass
         
         if ax != None: self.imshow(ax=ax) 
         return self
@@ -406,7 +407,7 @@ class Datacube:
 
     
     
-    def high_pass_gaussian(self, window=15, mode='divide', ax=None):
+    def high_pass_gaussian(self, window=15, mode='auto', ax=None):
         '''Apply a High-Pass Gaussian filter by subtracting a Low-Pass filter from the Data
         Pass the window in units of pixels. Blur only along the wavelength dimension (axis=1)'''
         from scipy import ndimage
@@ -414,6 +415,14 @@ class Datacube:
         nans = np.isnan(self.wlt)
         
         lowpass = ndimage.gaussian_filter(self.flux[:,~nans], [0, window])
+        # check whether to SUBTRACT or DIVIDE based on the data baseline (1 or 0)
+        eps = 1e-1
+        if mode == 'auto': 
+            # print('Mean = {:.4e}'.format(np.nanmean(self.flux)))
+            if np.nanmean(self.flux) < eps:
+                mode = 'subtract'
+            else:
+                mode = 'divide'
         # Divide or Subtract by the low-pass Gaussian filter 
         self.flux[:,~nans] = getattr(np, mode)(self.flux[:,~nans], lowpass)
         
@@ -590,15 +599,33 @@ class Datacube:
         if ax != None: self.imshow(ax=ax)
         return self 
     
-    def PCA(self, n, ax=None):
+    def standarize(self, ax=None):
+        f = self.flux[:,~self.nans]
+        # Step 0: Standarization (see Pino+2022)
+        mean, std = np.nanmean(f, axis=0), np.nanstd(f, axis=0)
+        f -= mean
+        f /= std
+        self.flux[:,~self.nans] = f
+        if ax != None: self.imshow(ax=ax)
+
+        return self
+        
+    
+    def PCA(self, n, ax=None, save_model=False):
         nans = np.isnan(self.wlt)
-        u, s, vh = np.linalg.svd(self.flux[:,~nans], full_matrices=False)
+        dco = self.copy()
+        f = self.flux[:,~self.nans]
+        # Step 0: Subtract mean of each channel
+        f -= np.nanmean(f, axis=0)
+        
+        # Step 1: Singular Value Decomposition (SVD)
+        u, s, vh = np.linalg.svd(f, full_matrices=False)
         s1, s2 = (np.copy(s) for _ in range(2))
         
         # data_pro, noise = (self.copy() for _ in range(2))
         data_pro, PCA_model = (self.flux.copy() for _ in range(2))
         
-        # save the main PCs as the "processed data" in `data_pro`
+        # Step 2: Save the main PCs as the "processed data" in `data_pro`
         s1[0:n] = 0.
         W=np.diag(s1)
         data_pro[:,~nans] = np.dot(u,np.dot(W,vh))
@@ -609,7 +636,8 @@ class Datacube:
         PCA_model[:,~nans] = np.dot(u, np.dot(W, vh))
         
         self.flux = data_pro
-        self.PCA_model = PCA_model
+        if save_model:
+            self.PCA_model = PCA_model
         
         
         if ax != None: self.imshow(ax=ax)
@@ -716,9 +744,12 @@ class Datacube:
         self.flux = splev(wave, cs)
         return self
     
-    def continuum_remove(self):
-        self.normalise().sigma_clip(5.).remove_continuum('polyfit', deg=7)
+    def continuum_remove(self, ax=None):
+        self.normalise().sigma_clip(5.)
+        self.mask_sat_lines(sat=0.30)
+        self.remove_continuum('polyfit', deg=7)
         self.divide_master(30.)
+        if ax != None: self.imshow(ax=ax)
         return self
 #  
 #            

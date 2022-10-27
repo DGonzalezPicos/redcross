@@ -119,26 +119,18 @@ class Plot:
             obj = kpv_12.plot(ax=ax[2,2], **self.args)
             
             nights = ['1','2','1+2']
-            labels = ['A','B','AB']
+            labels = ['A','B','A+B']
             for i,k in enumerate([kpv_1, kpv_2, kpv_12]):
                 ax[0,i].set_title('Night {:}'.format(nights[i]), fontsize=14)
-                k.get_slice(ax=ax[3,i], **self.args)
+                mylabel = 'K$_p$ = \n{:.1f} km/s'.format(peak[1])
+                
+                k.get_slice(ax=ax[3,i], label=mylabel, **self.args)
                 for j in range(3):
                     ax[j,i].text(s=labels[j], x=0.05, y=0.85, color='white', fontsize=19, transform=ax[j,i].transAxes)
                     ax[j,i].set(xticks=[], xlabel='', ylabel='')
                     
-            [axx.set(yticklabels='') for axx in ax[:,1:].flatten()]
-            [axx.legend() for axx in ax.flatten()]
-
-            
-            # fig.subplots_adjust(hspace=0.15)
-            # self.labels = ['1','2','1+2']
-            # self.labels = ['A','B','AB']
-            # titles = ['Night 1', 'Night 2', 'Night 1+2']
-            
-
-            # remove labels from yaxis
-            # [axe.set(xticks=[], xlabel='', ylabel='') for axe in ax[:,1:].flatten()]
+            [axx.set(yticklabels='', ylabel='') for axx in ax[:,1:].flatten()]
+            [axx.legend(handlelength=0.65, fontsize=10) for axx in ax.flatten()]
             cbar_ax = fig.add_axes([0.81, 0.40, 0.020, 0.4])
 
         
@@ -170,6 +162,7 @@ class Plot:
         # plt.show()
         if self.outname is not None:
             fig.savefig(self.outname, dpi=300, bbox_inches='tight', facecolor='white')
+            print('{:} saved...'.format(self.outname))
         return None
     
     def create_gif(self, prefix):

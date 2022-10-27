@@ -53,13 +53,18 @@ class Pipeline:
             
         return dco
     
-    def reduce_orders(self, dc, n_jobs=None, debug=False):
+    def reduce_orders(self, dc, n_jobs=None, debug=False, ignore_orders=None):
         orders = np.arange(0, dc.nOrders, dtype=int)
+        if type(ignore_orders) in [list, np.ndarray]:
+            orders = np.delete(orders, ignore_orders)
+            
+            
         self.dc = dc.copy() # make copy
         
-        n_jobs = n_jobs or self.n_jobs
-        print('Num cpus {:}'.format(n_jobs))
-        if n_jobs > 0:
+        if n_jobs != None:
+            self.n_jobs = n_jobs
+        # print('Num cpus {:}'.format(n_jobs))
+        if self.n_jobs > 0:
             verbose = 0
             if debug:
                 verbose = 2

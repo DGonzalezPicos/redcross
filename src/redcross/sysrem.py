@@ -10,10 +10,12 @@ class SysRem:
         # Get input from a single-order `Datacube`
         self.dco = dco
         self.nans = np.isnan(dco.wlt)
+        self.Nx = self.nans[self.nans==False].size
         
         # Define residual matrix (mean subtracted, masked data)
         self.r_ij  = np.array(dco.flux[:,~self.nans], dtype=np.float32)
         self.r_ij = (self.r_ij.T - np.nanmedian(self.r_ij, axis=1)).T
+        # self.r_ij -= np.nanmean(self.r_ij, axis=0) # subtract mean of each channel
         
         # Store the cumulative SysRem model by adding the fitted residuals
         self.sysrem_model = np.zeros_like(self.r_ij) # store the cumulative model
@@ -108,13 +110,17 @@ class SysRem:
 
 
 
-    def get_vectors(self, n, debug=False):
+    def get_vectors(self, n, debug=False, return_matrix=False):
         '''Get the explicit `a` and `c` vectors for every SysRem iteration
         The SysRem model is then np.outer(a,c)'''
         a = np.zeros((n, self.dco.nObs))
-        c = np.zeros((n, self.dco.nPix))
+        c = np.zeros((n, self.Nx))
         for i in range(n):
             self.iterate_ac(debug=debug)
             a[i,] = self.a_j
             c[i,] = self.c_i
-        return a, c
+            
+        if return_matrix:
+            return np.array([np.outer(a[i], c[i]) for i in range(a.shape[0])])
+        else:
+            return a, c

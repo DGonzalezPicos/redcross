@@ -174,7 +174,7 @@ class CCF(Datacube):
                 
 class KpV:
     def __init__(self, ccf=None, planet=None, deltaRV=None, 
-                 kp_radius=50., vrest_max=80., bkg=20):
+                 kp_radius=50., vrest_max=80., bkg=60):
         if not ccf is None:
             self.ccf = ccf.copy()
             self.planet = deepcopy(planet)
@@ -183,7 +183,7 @@ class KpV:
             self.dRV = deltaRV or ccf.dRV
     
             self.kpVec = self.planet.Kp + np.arange(-kp_radius, kp_radius, self.dRV)
-            self.vrestVec = np.arange(-vrest_max, vrest_max, self.dRV)
+            self.vrestVec = np.arange(-vrest_max, vrest_max+self.dRV, self.dRV)
             self.bkg = bkg
             
             try:
@@ -197,8 +197,15 @@ class KpV:
         print(iObs)
         outRV = self.vrestVec + self.rv_planet[iObs]
         return interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV)    
+    @property
+    def snr(self):
+        noise_region = np.abs(self.vrestVec)>self.bkg
+        noise = np.std(self.ccf_map[:,noise_region])
+        bkg = np.median(self.ccf_map[:,noise_region])
+        return((self.ccf_map - bkg) / noise)
         
-    def run(self, snr=True, ignore_eclipse=True, ax=None):
+        
+    def run(self, ignore_eclipse=True, ax=None):
         '''Generate a Kp-Vsys map
         if snr = True, the returned values are SNR (background sub and normalised)
         else = map values'''
@@ -207,28 +214,27 @@ class KpV:
         if ignore_eclipse:   
             ecl = self.planet.mask_eclipse(return_mask=True)
             
-        snr_map = np.zeros((len(self.kpVec), len(self.vrestVec)))
+        ccf_map = np.zeros((len(self.kpVec), len(self.vrestVec)))
         
         for ikp in range(len(self.kpVec)):            
             self.planet.Kp = self.kpVec[ikp]
             pRV = self.planet.RV
             for iObs in np.where(ecl==False)[0]:
                 outRV = self.vrestVec + pRV[iObs]
-                snr_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
-                
+                ccf_map[ikp,] += interp1d(self.ccf.rv, self.ccf.flux[iObs,])(outRV) 
+        self.ccf_map = ccf_map
             
-        if snr:
-            noise_map = np.std(snr_map[:,np.abs(self.vrestVec)>self.bkg])
-            bkg_map = np.median(snr_map[:,np.abs(self.vrestVec)>self.bkg]) # subtract the background level
-            snr_map -= bkg_map        
-            self.snr = snr_map / noise_map
-        else:
-            self.snr = snr_map # NOT ACTUAL SIGNAL-TO-NOISE ratio (useful for computing weights)
-            
-        self.bestSNR = self.snr.max() # store info as variable
+        # self.bestSNR = self.snr.max() # store info as variable
         if ax != None: self.imshow(ax=ax)
         return self
     
+    def get_snr(self, bkg=None):
+        bkg = bkg or self.bkg
+        noise_map = np.std(self.snr[:,np.abs(self.vrestVec)>bkg])
+        bkg_map = np.median(self.snr[:,np.abs(self.vrestVec)>bkg]) # subtract the background level
+        self.snr -= bkg_map        
+        self.snr /= noise_map
+        return self
     
     def xcorr(self, f,g):
         nx = len(f)
@@ -399,8 +405,6 @@ class KpV:
         vmin = vmin or self.snr.min()
         vmax = vmax or self.snr.max()
         
-        
-        
         x_label = [r'$K_p$', r'$\Delta v$']
         x = np.array([self.kpVec, self.vrestVec])
         
@@ -414,15 +418,15 @@ class KpV:
         
         if ax != None:
             label = '{:}\n{:.1f} km/s'.format(x_label[axis], peak[axis])
-            label = ''
-            ax.plot(x, y, label=label, **kwargs)
+            ax.plot(x, y, **kwargs)
             ax.set(ylabel='SNR', xlabel=x_label[::-1][axis]+' (km/s)', 
                    xlim=(x.min(), x.max()), ylim=(vmin, vmax))
-            ax.set_title('CCF at {:} = {:.1f} km/s'.format(x_label[axis], peak[axis]))
-            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.4)
+            # ax.set_title('CCF at {:} = {:.1f} km/s'.format(x_label[axis], peak[axis]))
+            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.2)
             if fit:
                 ax.plot(x, self.gaussian(x, *popt), ls='--', alpha=0.9, 
                         label='Gaussian fit', c='darkgreen')
+                ax.axvline(x=popt[1], ls='--',c='darkgreen', alpha=0.7)
             ax.legend(handlelength=0.55)
             
         if fit:
@@ -433,38 +437,38 @@ class KpV:
         
         
     
-    def plot_slice(self, mode='kp', peak=None, ax=None, vmin=None, vmax=None, 
-                   label=None, return_data=False, **kwargs):
-        ax = ax or plt.gca()
-        peak = peak or self.snr_max()[:2]
-        vmin = vmin or self.snr.min()
-        vmax = vmax or self.snr.max()
+    # def plot_slice(self, mode='kp', peak=None, ax=None, vmin=None, vmax=None, 
+    #                label=None, return_data=False, **kwargs):
+    #     ax = ax or plt.gca()
+    #     peak = peak or self.snr_max()[:2]
+    #     vmin = vmin or self.snr.min()
+    #     vmax = vmax or self.snr.max()
         
         
-        if mode == 'kp':
-            ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
-            # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
-            y = self.snr[ind_kp0,:]
-            label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
-            ax.plot(self.vrestVec, y, '-', label=label, **kwargs)
+    #     if mode == 'kp':
+    #         ind_kp0 = np.abs(self.kpVec - peak[1]).argmin()
+    #         # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
+    #         y = self.snr[ind_kp0,:]
+    #         label = label or 'Kp = {:.1f} km/s'.format(self.kpVec[ind_kp0])
+    #         ax.plot(self.vrestVec, y, '-', label=label, **kwargs)
             
-            ax.set(xlabel='$\Delta v$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
+    #         ax.set(xlabel='$\Delta v$ (km/s)', ylabel='SNR', xlim=(self.vrestVec.min(), self.vrestVec.max()))
             
-        elif mode == 'dv':
-            ind_dv0 = np.abs(self.vrestVec - peak[0]).argmin()
-            # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
-            y = self.snr[:,ind_dv0] # magnitude to plot / return
-            label = label or '$\Delta$v = {:.1f} km/s'.format(self.vrestVec[ind_dv0])
-            ax.plot(self.kpVec, y, '-', label=label, **kwargs)
-            ax.set(xlabel='$K_p$ (km/s)', ylabel='SNR', xlim=(self.kpVec.min(), self.kpVec.max()))
+    #     elif mode == 'dv':
+    #         ind_dv0 = np.abs(self.vrestVec - peak[0]).argmin()
+    #         # print('Best Kp = {:.1f} km/s'.format(kpv_12.kpVec[ind_kp0]))
+    #         y = self.snr[:,ind_dv0] # magnitude to plot / return
+    #         label = label or '$\Delta$v = {:.1f} km/s'.format(self.vrestVec[ind_dv0])
+    #         ax.plot(self.kpVec, y, '-', label=label, **kwargs)
+    #         ax.set(xlabel='$K_p$ (km/s)', ylabel='SNR', xlim=(self.kpVec.min(), self.kpVec.max()))
             
-        ax.set_ylim((vmin, vmax))
-        ax.legend(frameon=False, loc='upper right')
+    #     ax.set_ylim((vmin, vmax))
+    #     ax.legend(frameon=False, loc='upper right')
             
-        if return_data:
-            return y
-        else:
-            return ax
+    #     if return_data:
+    #         return y
+    #     else:
+    #         return ax
         
         
         
@@ -472,13 +476,8 @@ class KpV:
     def merge_kpvs(self, kpv_list):
         new_kpv = kpv_list[0].copy()
         # add signal
-        new_kpv.snr = np.sum([kpv_list[i].snr for i in range(len(kpv_list))], axis=0)
-        
-        # convert into actual SNR 
-        noise_map = np.std(new_kpv.snr[:,np.abs(new_kpv.vrestVec)>new_kpv.bkg])
-        bkg_map = np.median(new_kpv.snr[:,np.abs(new_kpv.vrestVec)>new_kpv.bkg]) # subtract the background level
-        new_kpv.snr -= bkg_map   
-        new_kpv.snr /= noise_map
+        # new_kpv.snr = np.sum([kpv_list[i].snr for i in range(len(kpv_list))], axis=0)
+        new_kpv.ccf_map = np.sum([kpv_list[i].ccf_map for i in range(len(kpv_list))], axis=0)
         return new_kpv
     
     def fit_peak(self):
