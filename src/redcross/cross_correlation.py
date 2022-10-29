@@ -174,7 +174,7 @@ class CCF(Datacube):
                 
 class KpV:
     def __init__(self, ccf=None, planet=None, deltaRV=None, 
-                 kp_radius=50., vrest_max=80., bkg=60):
+                 kp_radius=50., vrest_max=80., bkg=None):
         if not ccf is None:
             self.ccf = ccf.copy()
             self.planet = deepcopy(planet)
@@ -184,7 +184,7 @@ class KpV:
     
             self.kpVec = self.planet.Kp + np.arange(-kp_radius, kp_radius, self.dRV)
             self.vrestVec = np.arange(-vrest_max, vrest_max+self.dRV, self.dRV)
-            self.bkg = bkg
+            self.bkg = bkg or vrest_max*0.60
             
             try:
                 self.planet.frame = self.ccf.frame
@@ -228,13 +228,14 @@ class KpV:
         if ax != None: self.imshow(ax=ax)
         return self
     
-    def get_snr(self, bkg=None):
-        bkg = bkg or self.bkg
-        noise_map = np.std(self.snr[:,np.abs(self.vrestVec)>bkg])
-        bkg_map = np.median(self.snr[:,np.abs(self.vrestVec)>bkg]) # subtract the background level
-        self.snr -= bkg_map        
-        self.snr /= noise_map
-        return self
+    # def get_snr(self, bkg=None):
+        '''deprecated... use property self.snr'''
+    #     bkg = bkg or self.bkg
+    #     noise_map = np.std(self.snr[:,np.abs(self.vrestVec)>bkg])
+    #     bkg_map = np.median(self.snr[:,np.abs(self.vrestVec)>bkg]) # subtract the background level
+    #     self.snr -= bkg_map        
+    #     self.snr /= noise_map
+    #     return self
     
     def xcorr(self, f,g):
         nx = len(f)
@@ -269,16 +270,24 @@ class KpV:
         return(bestVr, bestKp, self.bestSNR)
     
     def plot(self, fig=None, ax=None, peak=None, vmin=None, vmax=None, label='',
-             plot_peak=True):
+             plot_peak=True, snr=True):
         lims = [self.vrestVec[0],self.vrestVec[-1],self.kpVec[0],self.kpVec[-1]]
-        vmin = vmin or self.snr.min()
-        vmax = vmax or self.snr.max()
+
 
         ax = ax or plt.gca()
-        obj = ax.imshow(self.snr,origin='lower',extent=lims,aspect='auto', 
+        
+        if snr: # Plot SNR
+            y = self.snr
+        else: # Plot actual values
+            y = self.ccf_map
+            
+        vmin = vmin or y.min()
+        vmax = vmax or y.max()
+        
+        obj = ax.imshow(y,origin='lower',extent=lims,aspect='auto', 
                         cmap='inferno',vmin=vmin,vmax=vmax, label=label)
         if not fig is None: fig.colorbar(obj, ax=ax, pad=0.05)
-        ax.set_xlabel('$\Delta$v (km/s)')
+        ax.set_xlabel('$\Delta v$ (km/s)')
         ax.set_ylabel('K$_p$ (km/s)')
 
         if plot_peak:
@@ -292,7 +301,7 @@ class KpV:
             line_args ={'ls':':', 'c':'white','alpha':0.35,'lw':'3.'}
             ax.axhline(y=row, **line_args)
             ax.axvline(x=col, **line_args)
-            ax.scatter(col, row, marker='*', s=3., c='green',alpha=0.7,label='SNR = {:.2f}'.format(self.snr[indh,indv]))
+            ax.scatter(col, row, marker='*', s=3., c='green',alpha=0.7,label='SNR = {:.2f}'.format(y[indh,indv]))
 
         return obj
     

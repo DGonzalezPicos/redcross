@@ -56,9 +56,11 @@ class Pipeline:
     def reduce_orders(self, dc, n_jobs=None, debug=False, ignore_orders=None):
         orders = np.arange(0, dc.nOrders, dtype=int)
         if type(ignore_orders) in [list, np.ndarray]:
-            orders = np.delete(orders, ignore_orders)
+            orders = np.setxor1d(orders, ignore_orders) # Find the non-intersection between two arrays
+            print('Reducing {:}/{:} orders...'.format(orders.size, dc.nOrders))
             
             
+        # print(orders)
         self.dc = dc.copy() # make copy
         
         if n_jobs != None:
@@ -73,7 +75,8 @@ class Pipeline:
             # output = p_map(self.reduce, orders, n_jobs=n_jobs)
             output = Parallel(n_jobs=self.n_jobs, verbose=verbose)(
                 delayed(self.reduce)(o) for o in orders)
-            [self.dc.update(output[k], k) for k in range(len(output))]
+            for k,o in enumerate(orders):
+                self.dc.update(output[k], o)
         else:
             # no parallelisation
             [self.dc.update(self.reduce(o), o) for o in orders]
