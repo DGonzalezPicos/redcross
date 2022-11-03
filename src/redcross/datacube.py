@@ -66,6 +66,7 @@ class Datacube:
             wave = np.nanmedian(self.wlt, axis=0)
         else:
             wave = self.wlt
+        wave = np.arange(0, self.nPix)
         ax.plot(wave, np.nanmedian(self.flux, axis=0), **kwargs)
 #            ax.set(xlabel='Wavelength ({:})'.format(self.wlt_unit), ylabel='Flux')
         
@@ -512,11 +513,31 @@ class Datacube:
         return self
     
     
-    def align(self, ax=None):
-        from .align import Align
-        dco = self.copy()
-        self = Align(dco).apply_shifts(ax=ax).dco
+    # def align(self, ax=None):
+    #     '''old version'''
+    #     from .align import Align
+    #     dco = self.copy()
+    #     self = Align(dco).apply_shifts(ax=ax).dco
+    #     return self
+    
+    def remove_lowpass(self, window=30.):
+        from scipy import ndimage
+        lowpass = ndimage.gaussian_filter(self.flux, [0, window])
+        self.flux /= lowpass
         return self
+            
+    
+    def align(self, ax=None, debug=False):
+        from .align import Align
+        RV = (2., 0.01) # amplitude, resolution
+        RVt = np.arange(-RV[0], RV[0]+RV[1], RV[1])  
+        al = Align(self, RVt).run()
+
+        new_dco = al.apply_shifts().dco_corr
+        # new_dco = al.apply_shifts().dco # return normalised and continuum sub data
+        if debug:
+            al.plot_results()
+        return new_dco
 
     def shift(self, RV, mode='linear'):
         '''copy of `to_stellar_frame` for any RV'''
@@ -564,6 +585,8 @@ class Datacube:
     def trim(self, npix=100):
         self.wlt = self.wlt[npix:-npix]
         self.flux = self.flux[:, npix:-npix]
+        if hasattr(self, 'flux_err'):
+            self.flux_err = self.flux_err[:,npix:-npix]
         return self
     
     # def to_stellar_frame(self, BERV):
@@ -586,6 +609,7 @@ class Datacube:
         '''new sysrem implementation (august 25th 2022)'''
         from .sysrem import SysRem
 #        dco = self.copy()
+        self.estimate_noise() # TESTING: this step overwrites the `flux_err ` vector
         sys = SysRem(self).run(n, mode, debug, outdir)
         nans =  np.isnan(self.wlt)
         
@@ -744,9 +768,9 @@ class Datacube:
         self.flux = splev(wave, cs)
         return self
     
-    def continuum_remove(self, ax=None):
-        self.normalise().sigma_clip(5.)
-        self.mask_sat_lines(sat=0.30)
+    def continuum_remove(self, sigma=5., sat=0.30, ax=None):
+        self.normalise().sigma_clip(sigma)
+        self.mask_sat_lines(sat=sat)
         self.remove_continuum('polyfit', deg=7)
         self.divide_master(30.)
         if ax != None: self.imshow(ax=ax)

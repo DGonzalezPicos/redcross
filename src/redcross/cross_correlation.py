@@ -15,7 +15,7 @@ class CCF(Datacube):
     def __init__(self, rv=None, template=None, flux=None, **kwargs):
         self.rv = rv
         if not self.rv is None: self.dRV = np.mean(np.diff(self.rv)) # resolution
-        self.template = template.copy()
+        if not template is None: self.template = template.copy()
         self.flux = flux
         
         
