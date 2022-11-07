@@ -609,14 +609,14 @@ class Datacube:
         '''new sysrem implementation (august 25th 2022)'''
         from .sysrem import SysRem
 #        dco = self.copy()
-        self.estimate_noise() # TESTING: this step overwrites the `flux_err ` vector
+        # self.estimate_noise() # TESTING: this step overwrites the `flux_err ` vector
         sys = SysRem(self).run(n, mode, debug, outdir)
         nans =  np.isnan(self.wlt)
         
         if mode == 'divide':
             self.flux[:, ~nans] /= (1. + sys.sysrem_model)
         elif mode == 'subtract':
-            self.flux[:, ~nans] = sys.r_ij
+            self.flux[:, ~nans] -= sys.sysrem_model
         
         
         if save_model: self.sysrem_model = sys.sysrem_model
