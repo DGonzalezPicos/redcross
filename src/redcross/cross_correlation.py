@@ -78,7 +78,7 @@ class CCF(Datacube):
 
         # compute the CCF-map in one step, `_i` refers to the given order 
         if noise == 'flux_err':
-            noise2 = dco.flux_err[:, ~nans]**2
+            noise2 = np.mean(dco.flux_err[:, ~nans]**2, axis=0)
         elif noise == 'var':
             noise2 = np.var(f, axis=0)
             
@@ -94,7 +94,7 @@ class CCF(Datacube):
                 if 'high_pass_gaussian' in dc.reduction:
                     window = dc.reduction['high_pass_gaussian']['window']
                     print('Applying filter of window = {:} pixels'.format(window))
-                    self.template.high_pass_gaussian(window, mode='divide')
+                    self.template.high_pass_gaussian(window)
     
         if len(dc.shape) > 2:
             # Iterate over orders and sum each CCF_i
@@ -291,28 +291,67 @@ class KpV:
         ax.set_ylabel('K$_p$ (km/s)')
 
         if plot_peak:
-            peak = peak or self.snr_max()
+            self.snr_at_peak(peak)
+            # peak = peak or self.snr_max()
             
-            indv = np.abs(self.vrestVec - peak[0]).argmin()
-            indh = np.abs(self.kpVec - peak[1]).argmin()
+            # indv = np.abs(self.vrestVec - peak[0]).argmin()
+            # indh = np.abs(self.kpVec - peak[1]).argmin()
         
-            row = self.kpVec[indh]
-            col = self.vrestVec[indv]
+            row = self.kpVec[self.indh]
+            col = self.vrestVec[self.indv]
             line_args ={'ls':':', 'c':'white','alpha':0.35,'lw':'3.'}
             ax.axhline(y=row, **line_args)
             ax.axvline(x=col, **line_args)
-            ax.scatter(col, row, marker='*', s=3., c='green',alpha=0.7,label='SNR = {:.2f}'.format(y[indh,indv]))
+            ax.scatter(col, row, marker='*', s=3., c='green',alpha=0.7,label='SNR = {:.2f}'.format(y[self.indh,self.indv]))
 
         return obj
     
-    def snr_at_peak(self, peak):
-        self.indv = np.abs(self.vrestVec - peak[0]).argmin()
-        self.indh = np.abs(self.kpVec - peak[1]).argmin()
-        self.peak_snr = self.snr[self.indh,self.indv]
+    def snr_at_peak(self, peak=None):
+        '''
+        FInd the position and the SNR value of a given peak. If `peak` is a float
+        it is considered the Kp value and the function searches for the peak around a range of DeltaV (< 5km/s)
+        If `peak` is None, then we search for the peak around the expected planet position with a range of
+        +- 10 km/s for Kp 
+        +- 5 km/s for DeltaV
+
+        Parameters
+        ----------
+        peak : None, float, tuple, optional
+            Position of the peak. The default is None.
+
+        Returns
+        -------
+            self (with relevant values stored as self.peak_pos and self.peak_snr)
+
+        '''
+        if peak is None:
+            snr = self.snr
+            mask_kp = np.abs(self.kpVec - self.kpVec.mean()) < 10.
+            mask_dv = np.abs(self.vrestVec) < 5. # around 0.0 km/s
+            snr[~mask_kp, :] = snr.min()
+            snr[:, ~mask_dv] = snr.min()
+            
+            # max_snr = self.snr[mask_kp, mask_dv].argmax()
+            indh,indv = np.where(snr == snr.max())
+            self.indh, self.indv = int(indh), int(indv)
+            self.peak_pos = (float(self.vrestVec[self.indv]), float(self.kpVec[self.indh]))
+            
+        elif isinstance(peak, float):
+            self.indh = np.abs(self.kpVec - peak).argmin()
+            mask_dv = np.abs(self.vrestVec) < 5. # around 0.0 km/s
+            mask_indv = self.snr[self.indh, mask_dv].argmax()
+            self.indv = np.argwhere(self.vrestVec == self.vrestVec[mask_dv][mask_indv])
+            print(self.vrestVec[self.indv])
+
+        elif isinstance(peak, (tuple, list)):
+            self.indv = np.abs(self.vrestVec - peak[0]).argmin()
+            self.indh = np.abs(self.kpVec - peak[1]).argmin()
+        
+        self.peak_snr = float(self.snr[self.indh,self.indv])
         return self
         
     def fancy_figure(self, figsize=(6,6), peak=None, vmin=None, vmax=None,
-                     outname=None, title=None, **kwargs):
+                     outname=None, title=None, display=True, **kwargs):
         '''Plot Kp-Vsys map with horizontal and vertical slices 
         snr_max=True prints the SNR for the maximum value'''
         import matplotlib.gridspec as gridspec
@@ -367,12 +406,15 @@ class KpV:
         ax1.axvline(x=col, **line_args)
         ax1.scatter(col, row, marker='*', c='red',label='SNR = {:.2f}'.format(self.peak_snr), s=6.)
         ax1.legend(handlelength=0.75)
+
     
         if title != None:
             fig.suptitle(title, x=0.45, y=0.915, fontsize=14)
     
         if outname != None:
             fig.savefig(outname, dpi=200, bbox_inches='tight', facecolor='white')
+        if not display:
+            plt.close()
         return self
     
     def copy(self):

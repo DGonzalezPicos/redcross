@@ -99,9 +99,12 @@ class Template(Datacube):
         
         # if np.isnan(self.cs[1]).any():
         if self.mode == 'linear':
+            if not hasattr(self, 'cl'):
+                self.cl = interp1d(self.wlt, self.flux, bounds_error=False, fill_value=0.0)
             gflux = self.cl(new_wave*beta)
             
         elif self.mode == 'spline':
+            if not hasattr(self, 'cs'): self.get_spline()
             gflux = splev(new_wave*beta, self.cs)
             
         if return_self:

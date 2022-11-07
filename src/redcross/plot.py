@@ -89,7 +89,7 @@ class Plot:
         
         vmin = vmin or -4
         vmax = vmax or 8.
-        # peak = peak or (0.8, 194.7)
+        # peak = peak or self.kpv.snr_at_peak().peak_pos
         
         self.args = {'vmin':vmin, 'vmax':vmax, 'peak':peak}
     
@@ -122,9 +122,10 @@ class Plot:
             labels = ['A','B','A+B']
             for i,k in enumerate([kpv_1, kpv_2, kpv_12]):
                 ax[0,i].set_title('Night {:}'.format(nights[i]), fontsize=14)
-                mylabel = 'K$_p$ = \n{:.1f} km/s'.format(peak[1])
+                # mylabel = 'K$_p$ = \n{:.1f} km/s'.format(peak[1])
                 
-                k.get_slice(ax=ax[3,i], label=mylabel, **self.args)
+                # k.get_slice(ax=ax[3,i], label=mylabel, **self.args)
+                k.get_slice(ax=ax[3,i], **self.args)
                 for j in range(3):
                     ax[j,i].text(s=labels[j], x=0.05, y=0.85, color='white', fontsize=19, transform=ax[j,i].transAxes)
                     ax[j,i].set(xticks=[], xlabel='', ylabel='')
