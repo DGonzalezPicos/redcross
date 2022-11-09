@@ -30,14 +30,33 @@ class CCF(Datacube):
     def wlt(self):
         return self.rv
     
+    # @property
+    # def snr(self):
+    #     rv_abs = np.abs(self.rv)
+    #     p40 = np.percentile(rv_abs, 40)
+    #     bkg = self.flux[:,rv_abs > p40]
+    #     ccf_1d = np.median(self.flux, axis=0)
+    #     ccf_1d -= np.median(bkg)
+    #     return ccf_1d / np.std(bkg)
+    
     @property
     def snr(self):
         rv_abs = np.abs(self.rv)
         p40 = np.percentile(rv_abs, 40)
-        bkg = self.flux[:,rv_abs > p40]
-        ccf_1d = np.median(self.flux, axis=0)
-        ccf_1d -= np.median(bkg)
-        return ccf_1d / np.std(bkg)
+        bkg = self.flux[rv_abs > p40]
+        ccf_snr = self.flux - np.median(bkg)
+        return ccf_snr / np.std(bkg)
+    
+    def plot(self, ax=None, snr=False, **kwargs):
+        ax = ax or plt.gca()
+        if snr:
+            y = self.snr
+        else:
+            y = self.flux
+        ax.plot(self.rv, y, **kwargs)
+        return ax
+    
+
     
     def __prepare_template(self, wave):
         # start = time.time()
@@ -81,6 +100,8 @@ class CCF(Datacube):
             noise2 = np.mean(dco.flux_err[:, ~nans]**2, axis=0)
         elif noise == 'var':
             noise2 = np.var(f, axis=0)
+        elif noise == 'ones':
+            noise2 = 1.
             
         # The CCF-map in one step
         return np.dot(f/noise2, g.T)
@@ -162,12 +183,18 @@ class CCF(Datacube):
     
     def autoccf(self):
         self.flux = np.zeros_like(self.rv)
-        wave, flux = self.template.wlt, self.template.flux
+        edge = int(self.template.wlt.size / 10)
 
-        beta = 1 + (self.rv/c)
-        for i in range(self.rv.size):
-            fxt_i = interp1d(wave*beta[i], flux, fill_value="extrapolate")(wave)
-            self.flux[i,] = np.dot(flux, fxt_i) / np.sum(fxt_i)
+        wave, flux = self.template.wlt[edge:-edge], self.template.flux[edge:-edge]
+
+        beta = 1 - (self.rv/c)
+        cl = interp1d(self.template.wlt, self.template.flux, fill_value=np.nanmedian(flux))
+        g = np.array([cl(wave*b) for b in beta])
+        divide = np.sum(g, axis=1)
+        self.flux = np.dot(flux, g.T) / divide
+        # for i in range(self.rv.size):
+        #     fxt_i = cl(wave*beta[i])
+        #     self.flux[i,] = np.dot(flux, fxt_i) / np.sum(fxt_i)
         return self
 
                 
@@ -188,7 +215,7 @@ class KpV:
             
             try:
                 self.planet.frame = self.ccf.frame
-                print(self.planet.frame)
+                # print(self.planet.frame)
             except:
                 print('Define data rest frame...')
             self.n_jobs = 6 # for the functions that allow parallelisation
@@ -203,7 +230,23 @@ class KpV:
         noise = np.std(self.ccf_map[:,noise_region])
         bkg = np.median(self.ccf_map[:,noise_region])
         return((self.ccf_map - bkg) / noise)
-        
+    
+    @property
+    def noise(self):
+        '''
+        Return the standard deviation of the region away from the peak i.e.
+        KpV.vrestVec > KpV.bkg
+        '''
+        noise_region = np.abs(self.vrestVec)>self.bkg
+        return np.std(self.ccf_map[:,noise_region])
+    @property
+    def baseline(self):
+        '''
+        Return the median value away from the peak i.e.
+        KpV.vrestVec > KpV.bkg
+        '''
+        noise_region = np.abs(self.vrestVec)>self.bkg
+        return np.median(self.ccf_map[:,noise_region])
         
     def run(self, ignore_eclipse=True, ax=None):
         '''Generate a Kp-Vsys map
@@ -228,14 +271,7 @@ class KpV:
         if ax != None: self.imshow(ax=ax)
         return self
     
-    # def get_snr(self, bkg=None):
-        '''deprecated... use property self.snr'''
-    #     bkg = bkg or self.bkg
-    #     noise_map = np.std(self.snr[:,np.abs(self.vrestVec)>bkg])
-    #     bkg_map = np.median(self.snr[:,np.abs(self.vrestVec)>bkg]) # subtract the background level
-    #     self.snr -= bkg_map        
-    #     self.snr /= noise_map
-    #     return self
+    
     
     def xcorr(self, f,g):
         nx = len(f)
@@ -349,6 +385,12 @@ class KpV:
         
         self.peak_snr = float(self.snr[self.indh,self.indv])
         return self
+    
+    def loc(self, dv, kp):
+        peak = (dv, kp)
+        indv = np.abs(self.vrestVec - peak[0]).argmin()
+        indh = np.abs(self.kpVec - peak[1]).argmin()
+        return float(self.ccf_map[indh, indv])
         
     def fancy_figure(self, figsize=(6,6), peak=None, vmin=None, vmax=None,
                      outname=None, title=None, display=True, **kwargs):
@@ -450,11 +492,17 @@ class KpV:
         return popt
     
     def get_slice(self, axis=0, peak=None, vmin=None, vmax=None, fit=False,
-                  ax=None, **kwargs):
-        peak = peak or self.snr_max()[:2]
+                  ax=None, snr=True, **kwargs):
+        if snr:
+            y = self.snr
+            ylabel = 'SNR'
+        else:
+            y = self.ccf_map
+            ylabel = 'CCF'
+        peak = peak or y.max()[:2]
         peak = peak[::-1] # invert the peak x,y
-        vmin = vmin or self.snr.min()
-        vmax = vmax or self.snr.max()
+        vmin = vmin or y.min()
+        vmax = vmax or y.max()
         
         x_label = [r'$K_p$', r'$\Delta v$']
         x = np.array([self.kpVec, self.vrestVec])
@@ -462,7 +510,7 @@ class KpV:
         ind = [np.abs(x[i] - peak[i]).argmin() for i in [0,1]][axis]
         x = x[::-1][axis] # get the correct x...
         
-        y = np.take(self.snr, ind, axis) # equivalent to self.snr[ind,:] for axis=0
+        y = np.take(y, ind, axis) # equivalent to y[ind,:] for axis=0
         
         if fit:
             popt = self.__fit_slice(x,y, x_label[::-1][axis])
@@ -470,10 +518,10 @@ class KpV:
         if ax != None:
             label = '{:}\n{:.1f} km/s'.format(x_label[axis], peak[axis])
             ax.plot(x, y, **kwargs)
-            ax.set(ylabel='SNR', xlabel=x_label[::-1][axis]+' (km/s)', 
+            ax.set(ylabel=ylabel, xlabel=x_label[::-1][axis]+' (km/s)', 
                    xlim=(x.min(), x.max()), ylim=(vmin, vmax))
             # ax.set_title('CCF at {:} = {:.1f} km/s'.format(x_label[axis], peak[axis]))
-            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.2)
+            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.1)
             if fit:
                 ax.plot(x, self.gaussian(x, *popt), ls='--', alpha=0.9, 
                         label='Gaussian fit', c='darkgreen')

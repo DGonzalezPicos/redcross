@@ -73,16 +73,11 @@ class Datacube:
         return ax
         
 
-    def imshow(self, fig=None, ax=None, s=3.,title='', vrange=None, **kwargs):
+    def imshow(self, fig=None, ax=None, s=3.,title='', vmin=None, vmax=None, **kwargs):
         
-        # nans = np.isnan(self.wlt)
-        if not vrange is None: 
-            s=-1.
-            vmin = vrange[0]
-            vmax = vrange[-1]
         if s > 0.:
-            vmin = np.nanmean(self.flux)-np.nanstd(self.flux) * s
-            vmax = np.nanmean(self.flux)+np.nanstd(self.flux) * s
+            vmin = vmin or np.nanmean(self.flux)-np.nanstd(self.flux) * s
+            vmax = vmax or np.nanmean(self.flux)+np.nanstd(self.flux) * s
         if s == 0:
             vmin = np.nanmin(self.flux)
             vmax = np.nanmax(self.flux)
