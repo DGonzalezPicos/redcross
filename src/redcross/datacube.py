@@ -60,13 +60,14 @@ class Datacube:
         self.header = {key: self.__dict__[key] for key in keys_to_extract} 
         return self
     
-    def plot(self, ax=None, **kwargs):
+    def plot(self, ax=None, pixels=False, **kwargs):
         ax = ax or plt.gca()
         if len(self.wlt.shape)>1:
             wave = np.nanmedian(self.wlt, axis=0)
         else:
             wave = self.wlt
-        wave = np.arange(0, self.nPix)
+        if pixels:
+            wave = np.arange(0, self.nPix)
         ax.plot(wave, np.nanmedian(self.flux, axis=0), **kwargs)
 #            ax.set(xlabel='Wavelength ({:})'.format(self.wlt_unit), ylabel='Flux')
         
@@ -528,11 +529,19 @@ class Datacube:
         RVt = np.arange(-RV[0], RV[0]+RV[1], RV[1])  
         al = Align(self, RVt).run()
 
-        new_dco = al.apply_shifts().dco_corr
+        self.flux = al.apply_shifts().dco_corr.flux
         # new_dco = al.apply_shifts().dco # return normalised and continuum sub data
         if debug:
             al.plot_results()
-        return new_dco
+        return self
+    
+    def set_wave(self, wave, debug=False):
+        in_shape = self.wlt.shape
+        self.wlt = wave
+        if debug:
+            print('Original wave vector {:}'.format(in_shape))
+            print('New wave vector {:}'.format(self.wlt.shape))
+        return self
 
     def shift(self, RV, mode='linear'):
         '''copy of `to_stellar_frame` for any RV'''
@@ -610,8 +619,11 @@ class Datacube:
         
         if mode == 'divide':
             self.flux[:, ~nans] /= (1. + sys.sysrem_model)
+            self.flux_err[:, ~nans] /= (1. + sys.sysrem_model)
+            # self.flux[:, ~nans] = (1. + sys.r_ij) / (1. + sys.sysrem_model)
         elif mode == 'subtract':
-            self.flux[:, ~nans] -= sys.sysrem_model
+            # self.flux[:, ~nans] -= sys.sysrem_model
+            self.flux[:,~nans] = sys.r_ij
         
         
         if save_model: self.sysrem_model = sys.sysrem_model
@@ -630,15 +642,17 @@ class Datacube:
         return self
         
     
-    def PCA(self, n, ax=None, save_model=False):
+    def PCA(self, n, mode='subtract', ax=None, save_model=False):
         nans = np.isnan(self.wlt)
-        dco = self.copy()
+        # dco = self.copy()
         f = self.flux[:,~self.nans]
         # Step 0: Subtract mean of each channel
-        f -= np.nanmean(f, axis=0)
+        # f -= np.nanmean(f, axis=0)
+        f = (f.T - np.nanmean(f, axis=1)).T
         
         # Step 1: Singular Value Decomposition (SVD)
         u, s, vh = np.linalg.svd(f, full_matrices=False)
+        print(s.shape)
         s1, s2 = (np.copy(s) for _ in range(2))
         
         # data_pro, noise = (self.copy() for _ in range(2))
@@ -654,7 +668,11 @@ class Datacube:
         W = np.diag(s2)
         PCA_model[:,~nans] = np.dot(u, np.dot(W, vh))
         
-        self.flux = data_pro
+        if mode == 'subtract':  
+            self.flux = data_pro
+        elif mode == 'divide':
+            self.flux[:,~nans] /= (1. + PCA_model[:,~nans])
+            
         if save_model:
             self.PCA_model = PCA_model
         

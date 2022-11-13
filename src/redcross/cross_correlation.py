@@ -492,14 +492,14 @@ class KpV:
         return popt
     
     def get_slice(self, axis=0, peak=None, vmin=None, vmax=None, fit=False,
-                  ax=None, snr=True, **kwargs):
+                  ax=None, snr=True, auto_label=True, **kwargs):
         if snr:
             y = self.snr
             ylabel = 'SNR'
         else:
             y = self.ccf_map
             ylabel = 'CCF'
-        peak = peak or y.max()[:2]
+        peak = peak or self.snr_max()[:2]
         peak = peak[::-1] # invert the peak x,y
         vmin = vmin or y.min()
         vmax = vmax or y.max()
@@ -516,12 +516,15 @@ class KpV:
             popt = self.__fit_slice(x,y, x_label[::-1][axis])
         
         if ax != None:
-            label = '{:}\n{:.1f} km/s'.format(x_label[axis], peak[axis])
-            ax.plot(x, y, **kwargs)
+            if auto_label:
+                label = '{:}\n{:.1f} km/s'.format(x_label[axis], peak[axis])
+                ax.plot(x, y, label=label, **kwargs)
+            else:
+                ax.plot(x, y, label=label, **kwargs)
             ax.set(ylabel=ylabel, xlabel=x_label[::-1][axis]+' (km/s)', 
                    xlim=(x.min(), x.max()), ylim=(vmin, vmax))
             # ax.set_title('CCF at {:} = {:.1f} km/s'.format(x_label[axis], peak[axis]))
-            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.1)
+            ax.axvline(x=peak[::-1][axis], ls='--',c='k', alpha=0.05)
             if fit:
                 ax.plot(x, self.gaussian(x, *popt), ls='--', alpha=0.9, 
                         label='Gaussian fit', c='darkgreen')
@@ -576,7 +579,7 @@ class KpV:
         new_kpv = kpv_list[0].copy()
         # add signal
         # new_kpv.snr = np.sum([kpv_list[i].snr for i in range(len(kpv_list))], axis=0)
-        new_kpv.ccf_map = np.sum([kpv_list[i].ccf_map for i in range(len(kpv_list))], axis=0)
+        new_kpv.ccf_map = np.sum([(k.ccf_map - k.baseline) for k in kpv_list], axis=0)
         return new_kpv
     
     def fit_peak(self):
