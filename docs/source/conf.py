@@ -28,6 +28,7 @@ exclude_patterns = ['_build', '**.ipynb_checkpoints']
 #html_theme = 'alabaster'
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+html_logo = 'redcross_logo.png'
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'petitRADTRANSdoc'
+htmlhelp_basename = 'redcross_doc'

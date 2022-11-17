@@ -29,6 +29,10 @@ class CCF(Datacube):
     @property
     def wlt(self):
         return self.rv
+
+    @property
+    def map(self):
+        return self.rv
     
     # @property
     # def snr(self):
@@ -105,6 +109,8 @@ class CCF(Datacube):
             
         # The CCF-map in one step
         return np.dot(f/noise2, g.T)
+
+
     
     def run(self, dc, apply_filter=False, noise='var', ax=None):
         self.frame = dc.frame
