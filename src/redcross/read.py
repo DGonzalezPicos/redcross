@@ -114,8 +114,9 @@ def read_harpsn(files, filetype='e2ds', max_files=1000, cache=False):
     
     
     data_dir = files[0].split('HARPN')[0]
-    dc_file = data_dir+'datacube_raw.npy'
+    
     if cache:
+        dc_file = data_dir+'datacube_raw.npy'
     # check if preloaded file exists on the given directory
         if os.path.exists(dc_file):
             return Datacube().load(dc_file)
